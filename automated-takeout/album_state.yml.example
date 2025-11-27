@@ -1,0 +1,51 @@
+# Google Photos Album Export State
+# Copy this file to album_state.yml and customize with your albums
+# 
+# Tracks which albums to export and when they were last exported
+# 
+# Fields:
+#   name: Exact album name as it appears in Google Photos
+#   last_export_date: ISO timestamp of last export (null = never exported)
+#   is_large: true = export individually, false = batch with other small albums
+#   export_frequency: "Export once" or "Export every 2 months for 1 year"
+
+albums:
+  # Example: Year-based albums (typically large)
+  - name: "Photos from 2023"
+    last_export_date: null
+    is_large: true
+    export_frequency: "Export once"
+  
+  - name: "Photos from 2024"
+    last_export_date: null
+    is_large: true
+    export_frequency: "Export once"
+  
+  - name: "Photos from 2025"
+    last_export_date: null
+    is_large: true
+    export_frequency: "Export every 2 months for 1 year"
+  
+  # Example: Named albums (typically smaller)
+  - name: "Family Vacation 2024"
+    last_export_date: null
+    is_large: false
+    export_frequency: "Export once"
+  
+  - name: "Birthday Party"
+    last_export_date: null
+    is_large: false
+    export_frequency: "Export once"
+  
+  - name: "Wedding Photos"
+    last_export_date: null
+    is_large: true
+    export_frequency: "Export once"
+
+# Large albums that get individual exports
+# This list is auto-generated from albums marked is_large: true
+large_albums:
+  - "Photos from 2023"
+  - "Photos from 2024"
+  - "Photos from 2025"
+  - "Wedding Photos"

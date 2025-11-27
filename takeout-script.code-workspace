@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"path": "."
+		}
+	],
+	"settings": {
+		"remote.SSH.defaultExtensions": [
+			"ms-python.python"
+		],
+		"files.exclude": {
+			"**/__pycache__": true,
+			"**/*.pyc": true
+		},
+		"github.copilot.chat.autoApprove": [
+			"*>/dev/null*",
+			"*>\\dev\\null*",
+		]
+	}
+}

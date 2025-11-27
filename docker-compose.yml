@@ -1,0 +1,129 @@
+services:
+  takeout-backup:
+    build:
+      context: ./takeout-backup
+    image: takeout-backup:latest
+    container_name: takeout-backup
+    restart: "no"
+    environment:
+      - RCLONE_CONFIG=/config/rclone/rclone.conf
+    volumes:
+      - /mnt/user/jumpdrive/gdrive/Takeout:/data/gdrive/Takeout
+      - /mnt/user/backups/google-takeout/raw:/data/photos/import/Takeout
+      - /mnt/user/appdata/rclone:/config/rclone
+    network_mode: bridge
+    labels:
+      - "chadburn.enabled=true"
+      - "chadburn.job-exec.takeout-backup.schedule=0 4 * * *"
+      - "chadburn.job-exec.takeout-backup.command=python /app/server_backup.py"
+
+  gdrive-backup:
+    build:
+      context: ./gdrive-backup
+    image: gdrive-backup:latest
+    container_name: gdrive-backup
+    restart: "no"
+    environment:
+      - RCLONE_CONFIG=/config/rclone/rclone.conf
+    volumes:
+      - /mnt/user/jumpdrive/gdrive:/mnt/user/jumpdrive/gdrive
+      - /mnt/user/appdata/rclone:/config/rclone
+    network_mode: bridge
+    labels:
+      - "chadburn.enabled=true"
+      - "chadburn.job-exec.gdrive-backup.schedule=0 5 * * *"
+      - "chadburn.job-exec.gdrive-backup.command=python /app/gdrive_backup.py"
+
+  immich-import:
+    build:
+      context: ./immich-import
+    image: immich-import:latest
+    container_name: immich-import
+    restart: "no"
+    environment:
+      - IMMICH_API_URL=${IMMICH_SERVER}/api
+      - IMMICH_API_KEY_FILE=/run/secrets/immich_api_key
+    volumes:
+      - /mnt/user/jumpdrive/gdrive/Takeout:/data/photos/import
+      - /mnt/user/appdata/takeout-script/cache/.immich_api_key:/run/secrets/immich_api_key:ro
+      - /mnt/user/appdata/takeout-script/cache:/cache
+    network_mode: bridge
+    labels:
+      - "chadburn.enabled=true"
+      - "chadburn.job-exec.immich-import.schedule=*/15 * * * *"
+      - "chadburn.job-exec.immich-import.command=python /app/immich_import.py"
+
+  automated-takeout:
+    build:
+      context: ./automated-takeout
+    image: automated-takeout:latest
+    container_name: automated-takeout
+    restart: "no"
+    environment:
+      - BROWSER_PROFILE=/browser-profile
+      - HEADLESS=true
+      - SERVER_IP=${SERVER_IP:-192.168.1.216}
+      - VNC_PORT=6901
+      - TAKEOUT_URL=https://takeout.google.com/settings/takeout/custom/photos
+      - SLEEP_MULTIPLIER=1
+    volumes:
+      - /mnt/user/appdata/gphotos/chromeuser:/browser-profile
+      - /mnt/user/appdata/takeout-script/cache/album_state.yml:/app/album_state.yml
+    network_mode: bridge
+    labels:
+      - "chadburn.enabled=true"
+      - "chadburn.job-exec.automated-takeout.schedule=10 1 * * *"
+      - "chadburn.job-exec.automated-takeout.command=python /app/automated_takeout.py"
+
+  login-helper:
+    build:
+      context: ./login-helper
+      args:
+        BASE_IMAGE_VERSION: ${kasmweb_version}
+    image: login-helper:latest
+    container_name: login-helper
+    restart: "no"
+    environment:
+      - BROWSER_PROFILE=/home/kasm-user/.config/google-chrome
+      - HEADLESS=true
+      - SERVER_IP=${SERVER_IP:-192.168.1.216}
+      - VNC_PORT=6901
+      - VNC_PW=${VNC_PASSWORD:-password}
+      - SLEEP_MULTIPLIER=0.5
+      - PROTECTED_PAGE_URL=https://takeout.google.com/settings/takeout/custom/photos
+      - LOGIN_REDIRECT_URL=accounts.google.com
+      - LOGIN_PAGE_LOCATOR=input[type="email"]
+    volumes:
+      - /mnt/user/appdata/gphotos/chromeuser:/home/kasm-user/.config/google-chrome
+    ports:
+      - "6901:6901"
+    network_mode: bridge
+    shm_size: '2gb'
+    depends_on:
+      version-watcher:
+        condition: service_completed_successfully
+    labels:
+      - "chadburn.enabled=true"
+      - "chadburn.job-exec.login-helper.schedule=5 1 * * *"
+      - "chadburn.job-exec.login-helper.command=/app/check_login.sh"
+
+  version-watcher:
+    build:
+      context: ./version-watcher
+    image: version-watcher:latest
+    container_name: version-watcher
+    restart: "no"
+    environment:
+      - DOCKER_IMAGE=kasmweb/chrome
+      - SERVICE_NAME=login-helper
+      - ENV_VAR_NAME=kasmweb_version
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /mnt/user/appdata/takeout-script/docker-compose.yml:/app/project/docker-compose.yml:ro
+      - /mnt/user/appdata/takeout-script/.env:/app/project/.env:rw
+    working_dir: /app
+    network_mode: bridge
+    labels:
+      - "chadburn.enabled=true"
+      - "chadburn.job-exec.version-watcher.schedule=0 1 * * *"
+      - "chadburn.job-exec.version-watcher.command=python /app/version_watcher.py"
