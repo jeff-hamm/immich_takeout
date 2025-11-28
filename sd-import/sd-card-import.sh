@@ -4,7 +4,7 @@
 
 DEVICE="$1"
 MOUNT_BASE="/mnt/sd-import"
-IMPORT_BASE="/mnt/user/jumpdrive/imports"
+IMPORT_BASE="${IMPORTS_PATH:-/mnt/user/jumpdrive/imports}"
 LOG_FILE="/var/log/sd-card-import.log"
 IMMICH_SERVER="${IMMICH_SERVER:-http://192.168.1.216:2283}"
 

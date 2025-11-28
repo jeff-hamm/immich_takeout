@@ -10,4 +10,5 @@ RUN --mount=type=cache,target=/root/.cache/pip \
 COPY automated_takeout.py /app/
 COPY album_state.yml /app/
 
-CMD ["python", "/app/automated_takeout.py"]
+ENTRYPOINT ["python", "/app/automated_takeout.py"]
+CMD []

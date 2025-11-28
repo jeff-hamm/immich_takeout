@@ -9,11 +9,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Try local env file first, then fall back to configured path
 if [ -f "$SCRIPT_DIR/immich-go-upload.env" ]; then
     source <(grep -v '^#' "$SCRIPT_DIR/immich-go-upload.env" | sed 's/^/export /')
-else
-    ENV_FILE="${TAKEOUT_SCRIPT_ENV:-/mnt/user/appdata/takeout-script/.env}"
-    if [ -f "$ENV_FILE" ]; then
-        source <(grep -v '^#' "$ENV_FILE" | sed 's/^/export /')
-    fi
 fi
 
 # Parse command line arguments
@@ -45,7 +40,7 @@ done
 
 # Fall back to environment variables if not provided via arguments
 IMMICH_SERVER="${SERVER:-${IMMICH_SERVER:-http://192.168.1.216:2283}}"
-API_KEY_FILE="${IMMICH_API_KEY_FILE:-/mnt/user/appdata/takeout-script/cache/.immich_api_key}"
+API_KEY_FILE="${IMMICH_API_KEY_FILE:-/mnt/user/appdata/takeout-script/state/.immich_api_key}"
 
 # Determine API key: command line > environment variable > file
 if [ -n "$KEY" ]; then
@@ -68,14 +63,17 @@ fi
 # Extract import date from path (format: YYYY-MM-DD_HHMMSS)
 IMPORT_DATE=$(date +%Y%m%d)
 
-# Run immich-go binary directly
-immich-go upload from-folder \
-    --server "$IMMICH_SERVER" \
-    --api-key "$IMMICH_API_KEY" \
-    --tag "SD-IMPORT/$IMPORT_DATE" \
-    --session-tag \
-    --manage-raw-jpeg=StackCoverRaw \
-    --log-file=/var/log/immich-go/upload-$IMPORT_DATE.log \
-    --on-errors=continue \
-    --manage-burst=Stack \
-    "$UPLOAD_PATH"
+# Run immich-import container in folder mode
+# The container will handle the immich-go upload and metadata creation
+docker run --rm \
+    --name "sd-import-$IMPORT_DATE" \
+    -e IMMICH_API_URL="$IMMICH_SERVER/api" \
+    -e IMMICH_API_KEY="$IMMICH_API_KEY" \
+    -e DELETE_AFTER_IMPORT=false \
+    -v "$UPLOAD_PATH:/data/import:ro" \
+    -v "${UPLOAD_PATH}/metadata:/data/metadata" \
+    --network bridge \
+    immich-import:latest \
+    folder --source-type sd-card \
+        --label "$IMPORT_DATE" \
+        --copy-failed

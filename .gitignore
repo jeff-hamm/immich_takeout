@@ -3,9 +3,7 @@
 *.env
 
 # API keys and sensitive data
-cache/.immich_api_key
-cache/imported_files.txt
-cache/album_state.yml
+state/
 
 # Personal album state files
 automated-takeout/album_state.yml

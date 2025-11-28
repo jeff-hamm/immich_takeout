@@ -1,33 +1,63 @@
 #!/usr/bin/env python3
 import os
+import re
 import subprocess
-import time
+import sys
 import zipfile
 from pathlib import Path
 
+# Add shared module to path (works both locally and in Docker)
+_script_dir = Path(__file__).parent
+if (_script_dir / "shared").exists():
+    sys.path.insert(0, str(_script_dir / "shared"))
+else:
+    sys.path.insert(0, str(_script_dir.parent / "shared"))
+from takeout_utils import MetadataBuilder
+
 # CONFIGURABLE PATHS (mapped in container)
-RCLONE_REMOTE = "gdrive:Takeout"  # rclone remote:path where Takeout exports appear
-GDRIVE_DIR = Path("/data/gdrive/Takeout")  # Primary sync location
+RCLONE_REMOTE = os.getenv("RCLONE_REMOTE", "gdrive:Takeout")  # rclone remote:path where Takeout exports appear
+GDRIVE_DIR = Path(os.getenv("GDRIVE_DIR", "/data/gdrive/Takeout"))  # Primary sync location
+METADATA_DIR = Path(os.getenv("METADATA_DIR", "/data/metadata"))  # Extraction metadata directory
+DELETE_AFTER_EXTRACT = os.getenv("DELETE_AFTER_EXTRACT", "true").lower() == "true"
+
+# Initialize metadata builder
+metadata_builder = MetadataBuilder(METADATA_DIR)
+
+
+def save_extraction_metadata(zip_path, extract_dir, related_parts=None):
+    """Save metadata about extracted files to a JSON file using shared module."""
+    try:
+        metadata_builder.create_extraction_only_metadata(
+            zip_path=zip_path,
+            extract_dir=extract_dir,
+            related_parts=related_parts
+        )
+        return True
+    except Exception as e:
+        print(f"[WARNING] Failed to save metadata: {e}")
+        return False
 
 
 def ensure_dirs():
     GDRIVE_DIR.mkdir(parents=True, exist_ok=True)
+    METADATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def is_multipart_zip(zip_path):
-    """Check if a zip file is part of a multi-part archive (can't be opened alone)."""
+def is_valid_zip(zip_path):
+    """Check if a zip file is valid and not corrupted."""
     try:
         with zipfile.ZipFile(zip_path, 'r') as zf:
-            # If we can open it and list contents, it's a valid single-part zip
-            zf.namelist()
-            return False
-    except zipfile.BadZipFile as e:
-        # Check if error message indicates multi-part archive
-        error_msg = str(e).lower()
-        if "not a zip file" in error_msg or "multi-part" in error_msg:
+            # Test the zip file integrity
+            bad_file = zf.testzip()
+            if bad_file:
+                print(f"[WARNING] Corrupted file in zip: {bad_file}")
+                return False
             return True
+    except zipfile.BadZipFile as e:
+        print(f"[WARNING] Invalid/corrupted zip file {zip_path.name}: {e}")
         return False
-    except Exception:
+    except Exception as e:
+        print(f"[WARNING] Error checking zip file {zip_path.name}: {e}")
         return False
 
 
@@ -61,8 +91,47 @@ def get_multipart_group(zip_path):
     return sorted(parts) if parts else [zip_path]
 
 
+def verify_extraction(zip_path, extract_dir):
+    """Verify that all files from a zip were extracted correctly."""
+    try:
+        with zipfile.ZipFile(zip_path, 'r') as zf:
+            missing_files = []
+            size_mismatches = []
+            
+            for info in zf.infolist():
+                # Skip directories
+                if info.is_dir():
+                    continue
+                
+                extracted_path = extract_dir / info.filename
+                
+                if not extracted_path.exists():
+                    missing_files.append(info.filename)
+                elif extracted_path.stat().st_size != info.file_size:
+                    size_mismatches.append((info.filename, info.file_size, extracted_path.stat().st_size))
+            
+            if missing_files:
+                print(f"[ERROR] Missing {len(missing_files)} files after extraction:")
+                for f in missing_files[:5]:  # Show first 5
+                    print(f"[ERROR]   - {f}")
+                if len(missing_files) > 5:
+                    print(f"[ERROR]   ... and {len(missing_files) - 5} more")
+                return False
+            
+            if size_mismatches:
+                print(f"[ERROR] {len(size_mismatches)} files have size mismatches:")
+                for f, expected, actual in size_mismatches[:5]:
+                    print(f"[ERROR]   - {f}: expected {expected}, got {actual}")
+                return False
+            
+            return True
+    except Exception as e:
+        print(f"[ERROR] Failed to verify extraction: {e}")
+        return False
+
+
 def extract_zip(zip_path, related_parts=None):
-    """Extract a zip file (single or multi-part) and remove the original(s)."""
+    """Extract a zip file (single or multi-part) and remove the original(s) after verification."""
     try:
         extract_dir = zip_path.parent / zip_path.stem.rsplit('-', 1)[0]
         extract_dir.mkdir(parents=True, exist_ok=True)
@@ -84,16 +153,44 @@ def extract_zip(zip_path, related_parts=None):
             else:
                 raise Exception(f"unzip failed: {result.stderr}")
         
-        # Remove all parts after successful extraction
-        parts_to_remove = related_parts if related_parts else [zip_path]
-        for part in parts_to_remove:
-            if part.exists():
-                part.unlink()
+        # Verify extraction before considering deletion
+        parts_to_verify = related_parts if related_parts else [zip_path]
+        all_verified = True
         
-        if related_parts and len(related_parts) > 1:
-            print(f"[INFO] Extracted and removed {len(related_parts)} parts")
+        for part in parts_to_verify:
+            if not verify_extraction(part, extract_dir):
+                print(f"[ERROR] Verification failed for {part.name}, keeping zip files")
+                all_verified = False
+                break
+        
+        if not all_verified:
+            if related_parts and len(related_parts) > 1:
+                print(f"[WARNING] Extracted {len(related_parts)} parts but verification failed, keeping originals")
+            else:
+                print(f"[WARNING] Extracted {zip_path.name} but verification failed, keeping original")
+            return True  # Extraction succeeded, just not deleting
+        
+        print(f"[DEBUG] Verified all files extracted correctly")
+        
+        # Save extraction metadata before deletion
+        save_extraction_metadata(zip_path, extract_dir, related_parts)
+        
+        # Remove all parts after successful extraction AND verification
+        if DELETE_AFTER_EXTRACT:
+            parts_to_remove = related_parts if related_parts else [zip_path]
+            for part in parts_to_remove:
+                if part.exists():
+                    part.unlink()
+            
+            if related_parts and len(related_parts) > 1:
+                print(f"[INFO] Extracted, verified, and removed {len(related_parts)} parts")
+            else:
+                print(f"[INFO] Extracted, verified, and removed: {zip_path.name}")
         else:
-            print(f"[INFO] Extracted and removed: {zip_path.name}")
+            if related_parts and len(related_parts) > 1:
+                print(f"[INFO] Extracted and verified {len(related_parts)} parts (kept originals)")
+            else:
+                print(f"[INFO] Extracted and verified: {zip_path.name} (kept original)")
         return True
     except Exception as e:
         print(f"[ERROR] Failed to extract {zip_path.name}: {e}")
@@ -106,14 +203,36 @@ def process_extracted_zips():
     
     extracted_groups = 0
     skipped_photos = 0
+    skipped_corrupt = 0
     processed_files = set()
     
     for zip_path in sorted(GDRIVE_DIR.rglob("*.zip")):
         if not zip_path.is_file() or zip_path in processed_files:
             continue
         
+        # Check if zip is valid/complete first
+        if not is_valid_zip(zip_path):
+            print(f"[WARNING] Skipping corrupted/incomplete zip: {zip_path.name}")
+            skipped_corrupt += 1
+            processed_files.add(zip_path)
+            continue
+        
         # Get all parts of this archive (if multi-part)
         related_parts = get_multipart_group(zip_path)
+        
+        # Validate all parts if multi-part
+        if len(related_parts) > 1:
+            all_valid = True
+            for part in related_parts:
+                if not is_valid_zip(part):
+                    print(f"[WARNING] Multi-part archive has corrupted part: {part.name}")
+                    all_valid = False
+                    break
+            
+            if not all_valid:
+                print(f"[WARNING] Skipping incomplete multi-part archive ({len(related_parts)} parts)")
+                processed_files.update(related_parts)
+                continue
         
         # Check if any part contains Google Photos (let immich-go handle those)
         has_photos = False
@@ -139,72 +258,14 @@ def process_extracted_zips():
         print(f"[INFO] Extracted {extracted_groups} archive(s)")
     if skipped_photos > 0:
         print(f"[INFO] Skipped {skipped_photos} Google Photos archive(s) for immich-go")
-    if extracted_groups == 0 and skipped_photos == 0:
+    if skipped_corrupt > 0:
+        print(f"[INFO] Skipped {skipped_corrupt} corrupted/incomplete zip file(s)")
+    if extracted_groups == 0 and skipped_photos == 0 and skipped_corrupt == 0:
         print(f"[INFO] No archives found to process")
-
-
-def cleanup_existing_files():
-    """Check remote files against local, delete remote if already exists with matching size."""
-    print(f"[INFO] Checking for files already synced...")
-    
-    # Get list of files from remote with size and modification time
-    cmd = [
-        "rclone",
-        "lsjson",
-        "-R",  # Recursive
-        RCLONE_REMOTE,
-    ]
-    
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        import json
-        remote_files = json.loads(result.stdout)
-        
-        deleted_count = 0
-        for remote_file in remote_files:
-            if remote_file.get('IsDir'):
-                continue
-            
-            remote_path = remote_file['Path']
-            remote_size = remote_file['Size']
-            
-            # Check if file exists locally
-            local_file = GDRIVE_DIR / remote_path
-            if local_file.exists():
-                local_size = local_file.stat().st_size
-                
-                # Compare size
-                if local_size == remote_size:
-                    print(f"[INFO] File already exists locally with matching size: {remote_path}")
-                    # Delete from remote
-                    delete_cmd = [
-                        "rclone",
-                        "deletefile",
-                        f"{RCLONE_REMOTE}/{remote_path}",
-                    ]
-                    delete_result = subprocess.run(delete_cmd, capture_output=True, text=True)
-                    if delete_result.returncode == 0:
-                        deleted_count += 1
-                        print(f"[INFO] Deleted from remote: {remote_path}")
-                    else:
-                        print(f"[WARNING] Failed to delete from remote: {remote_path}")
-        
-        if deleted_count > 0:
-            print(f"[INFO] Cleaned up {deleted_count} files already synced")
-        else:
-            print(f"[INFO] No duplicate files found on remote")
-            
-    except subprocess.CalledProcessError as e:
-        print(f"[WARNING] Failed to list remote files: {e}")
-    except Exception as e:
-        print(f"[WARNING] Error during cleanup: {e}")
 
 
 def run_sync():
     """Run a single sync cycle - move all files from Google Drive to local storage."""
-    cleanup_existing_files()
-    
-    # Run rclone move
     cmd = [
         "rclone",
         "move",
@@ -235,7 +296,8 @@ def main():
 
     print(f"[INFO] Starting Takeout sync...")
     print(f"[INFO] Syncing to: {GDRIVE_DIR}")
-    print(f"[INFO] NOTE: All files will be synced. immich-import will handle Google Takeout multi-part archives.")
+    print(f"[INFO] Delete after extract: {DELETE_AFTER_EXTRACT}")
+    print(f"[INFO] NOTE: Google Photos archives are left for immich-import.")
 
     try:
         run_sync()

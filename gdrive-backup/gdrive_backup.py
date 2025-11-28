@@ -5,13 +5,16 @@ import datetime
 from pathlib import Path
 
 # CONFIGURABLE PATHS
-RCLONE_REMOTE = "gdrive:"  # Sync entire Google Drive
-LOCAL_BACKUP_DIR = Path("/mnt/user/jumpdrive/gdrive")
-STATE_FILE = Path("/mnt/user/jumpdrive/gdrive/.state/last_sync.txt")
+RCLONE_REMOTE = os.getenv("RCLONE_REMOTE", "gdrive")
+if not RCLONE_REMOTE.endswith(":"):
+    RCLONE_REMOTE = RCLONE_REMOTE + ":"
+LOCAL_BACKUP_DIR = Path(os.getenv("GDRIVE_DIR", "/data/gdrive"))
+STATE_DIR = Path(os.getenv("STATE_DIR", "/data/state"))
+STATE_FILE = STATE_DIR / "last_sync.txt"
 
 
 def ensure_dirs():
-    for p in [LOCAL_BACKUP_DIR, STATE_FILE.parent]:
+    for p in [LOCAL_BACKUP_DIR, STATE_DIR]:
         p.mkdir(parents=True, exist_ok=True)
 
 

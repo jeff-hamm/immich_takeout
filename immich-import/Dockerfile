@@ -1,5 +1,4 @@
 FROM python:3.12-slim
-
 # Install immich-go using direct download method
 WORKDIR /tmp
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -17,9 +16,21 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-
-COPY immich_import.py /app/immich_import.py
-
 ENV PYTHONUNBUFFERED=1
 
-CMD ["python", "/app/immich_import.py"]
+# Build args for default configuration
+ARG IMMICH_SERVER
+ARG IMMICH_API_KEY_FILE
+ARG IMMICH_API_KEY
+
+# Set as environment variables
+ENV IMMICH_SERVER=${IMMICH_SERVER}
+ENV IMMICH_API_KEY_FILE=${IMMICH_API_KEY_FILE}
+ENV IMMICH_API_KEY=${IMMICH_API_KEY}
+
+# Copy shared module (must be copied into build context)
+COPY shared /app/shared
+COPY immich-import/immich_import.py /app/immich_import.py
+
+ENTRYPOINT ["python", "/app/immich_import.py"]
+CMD []

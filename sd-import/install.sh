@@ -23,19 +23,6 @@ echo "Setting script permissions..."
 chmod +x "$SCRIPT_DIR/sd-card-import.sh"
 chmod +x "$SCRIPT_DIR/immich-go-upload.sh"
 
-# Download and install immich-go binary if not already present
-if [ ! -f /usr/local/bin/immich-go ]; then
-    echo "Downloading immich-go binary..."
-    wget -q -O /tmp/immich-go.tar.gz https://github.com/simulot/immich-go/releases/latest/download/immich-go_Linux_x86_64.tar.gz
-    tar -xzf /tmp/immich-go.tar.gz -C /tmp
-    mv /tmp/immich-go /usr/local/bin/
-    chmod +x /usr/local/bin/immich-go
-    rm /tmp/immich-go.tar.gz
-    echo "immich-go installed: $(immich-go version)"
-else
-    echo "immich-go already installed: $(immich-go version)"
-fi
-
 # Install to runtime locations via symlinks
 echo "Creating symlinks in /usr/local/bin/..."
 ln -sf "$SCRIPT_DIR/sd-card-import.sh" /usr/local/bin/sd-card-import.sh
@@ -71,6 +58,29 @@ else
     echo "Warning: .env file not found at $ENV_FILE"
 fi
 
+# Load API key from file
+API_KEY_FILE="$SCRIPT_DIR/../state/.immich_api_key"
+if [ -f "$API_KEY_FILE" ]; then
+    IMMICH_API_KEY=$(cat "$API_KEY_FILE" | tr -d '\n\r ')
+fi
+
+# Project directory for docker builds
+PROJECT_DIR="$SCRIPT_DIR/.."
+
+# Build immich-import Docker image if not already present
+if ! docker image inspect immich-import:latest >/dev/null 2>&1; then
+    echo "Building immich-import Docker image..."
+    docker build \
+        --build-arg IMMICH_SERVER="${IMMICH_SERVER:-http://192.168.1.216:2283}" \
+        --build-arg IMMICH_API_KEY="${IMMICH_API_KEY:-}" \
+        -t immich-import:latest \
+        -f "$PROJECT_DIR/immich-import/Dockerfile" \
+        "$PROJECT_DIR"
+    echo "immich-import image built successfully"
+else
+    echo "immich-import image already exists"
+fi
+
 # Check if go script already has our installation commands
 if grep -q "sd-card-import.sh" "$BOOT_CONFIG/go"; then
     echo "SD card import is already in go script, skipping..."
@@ -81,46 +91,35 @@ else
 # SD Card Auto-Import - create symlinks to persistent scripts
 ln -sf "$SCRIPT_DIR/sd-card-import.sh" /usr/local/bin/sd-card-import.sh
 ln -sf "$SCRIPT_DIR/immich-go-upload.sh" /usr/local/bin/immich-go-upload
-ln -sf "$SCRIPT_DIR/../.env" /usr/local/bin/immich-go-upload.env
+ln -sf "$ENV_FILE" /usr/local/bin/immich-go-upload.env
 cp "$SCRIPT_DIR/99-sd-card-import.rules" /etc/udev/rules.d/
 udevadm control --reload-rules
 
-# Download and install immich-go binary if not already present
-if [ ! -f /usr/local/bin/immich-go ]; then
-    wget -q -O /tmp/immich-go.tar.gz https://github.com/simulot/immich-go/releases/latest/download/immich-go_Linux_x86_64.tar.gz
-    tar -xzf /tmp/immich-go.tar.gz -C /tmp
-    mv /tmp/immich-go /usr/local/bin/
-    chmod +x /usr/local/bin/immich-go
-    rm /tmp/immich-go.tar.gz
+# Source .env for configuration
+if [ -f "$ENV_FILE" ]; then
+    source <(grep -v '^#' "$ENV_FILE" | grep -v '^\$' | sed 's/^/export /')
+fi
+
+# Load API key
+if [ -f "$API_KEY_FILE" ]; then
+    export IMMICH_API_KEY=\$(cat "$API_KEY_FILE" | tr -d '\n\r ')
+fi
+
+# Build immich-import Docker image if not already present
+if ! docker image inspect immich-import:latest >/dev/null 2>&1; then
+    docker build \
+        --build-arg IMMICH_SERVER="\${IMMICH_SERVER:-http://192.168.1.216:2283}" \
+        --build-arg IMMICH_API_KEY="\${IMMICH_API_KEY:-}" \
+        -t immich-import:latest \
+        -f "$PROJECT_DIR/immich-import/Dockerfile" \
+        "$PROJECT_DIR"
 fi
 EOF
-
-    # Add environment variable exports if they exist
-    if [ -n "$IMMICH_SERVER" ]; then
-        echo "Adding IMMICH_SERVER configuration to go script..."
-        cat >> "$BOOT_CONFIG/go" << EOF
-
-# SD Card Import Configuration
-export IMMICH_SERVER="$IMMICH_SERVER"
-EOF
-    fi
-    
-    # Check if API key file exists and add it
-    API_KEY_FILE="$SCRIPT_DIR/../cache/.immich_api_key"
-    if [ -f "$API_KEY_FILE" ]; then
-        IMMICH_API_KEY=$(cat "$API_KEY_FILE" | tr -d '\n\r ')
-        if [ -n "$IMMICH_API_KEY" ]; then
-            echo "Adding IMMICH_API_KEY configuration to go script..."
-            cat >> "$BOOT_CONFIG/go" << EOF
-export IMMICH_API_KEY="$IMMICH_API_KEY"
-EOF
-        fi
-    fi
 fi
 
 # Create import directory
 echo "Creating import directory..."
-mkdir -p /mnt/user/jumpdrive/imports
+mkdir -p "${IMPORTS_PATH:-/mnt/user/jumpdrive/imports}"
 
 # Create log file
 echo "Creating log file..."
@@ -155,7 +154,7 @@ if [ -n "$IMMICH_SERVER" ]; then
         echo "  - API Key: NOT FOUND"
         echo ""
         echo "To enable Immich upload, add API key to:"
-        echo "  $SCRIPT_DIR/../cache/.immich_api_key"
+        echo "  $SCRIPT_DIR/../state/.immich_api_key"
         echo "Or manually add to $BOOT_CONFIG/go:"
         echo "  export IMMICH_API_KEY=\"your-api-key-here\""
     fi
@@ -165,7 +164,7 @@ else
     echo "1. Add configuration to: $SCRIPT_DIR/../.env"
     echo "   IMMICH_SERVER=http://192.168.1.216:2283"
     echo ""
-    echo "2. Add API key to: $SCRIPT_DIR/../cache/.immich_api_key"
+    echo "2. Add API key to: $SCRIPT_DIR/../state/.immich_api_key"
     echo ""
     echo "3. Re-run this installer or manually add to $BOOT_CONFIG/go:"
     echo "   export IMMICH_SERVER=\"http://192.168.1.216:2283\""

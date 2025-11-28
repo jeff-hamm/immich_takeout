@@ -6,243 +6,180 @@
 - **No SSH needed**: All commands run locally - do not use `ssh root@192.168.1.216`
 - **Direct access**: All paths like `/mnt/user/appdata/takeout-script` are directly accessible
 
-## Project Structure
+## Project Overview
 
-- Docker containers for backup automation
-- Python scripts for Google Takeout sync and Immich import
-- PowerShell deployment scripts (for remote deployment from Windows)
+Automated Google Photos backup system that:
+1. **Automates Google Takeout creation** via browser automation (Playwright)
+2. **Syncs Takeout exports** from Google Drive to local storage (rclone)
+3. **Imports Google Photos** into Immich with full metadata (immich-go)
+4. **Tracks import metadata** with a web viewer for auditing
 
-## Common Operations
+All services are scheduled via **Chadburn** (Docker-native cron scheduler) labels.
 
-### Building and Deploying Containers
+---
 
-```bash
-cd /mnt/user/appdata/takeout-script
-docker-compose build
-docker-compose up -d
-```
+## Docker Services (8 total)
 
-### Checking Container Status
+### Core Import Pipeline
 
-```bash
-docker ps -a | grep takeout
-docker logs -f takeout-backup
-docker logs -f immich-import
-```
+| Service | Schedule | Purpose |
+|---------|----------|---------|
+| `takeout-backup` | Daily 4:00 AM | Syncs Takeout folder from Google Drive, extracts non-photos zips |
+| `immich-import` | Every 15 min | Imports Google Photos zips to Immich using immich-go |
+| `gdrive-backup` | Daily 5:00 AM | Syncs entire Google Drive (excluding Takeout folder) |
 
-### Testing Scripts
+### Automation & Login
 
-```bash
-# Test server_backup.py
-docker run --rm \
-  -v /mnt/user/jumpdrive/gdrive/Takeout:/data/gdrive/Takeout \
-  -v /mnt/user/backups/google-takeout/raw:/data/photos/import/Takeout \
-  -v /mnt/user/appdata/rclone:/config/rclone \
-  takeout-backup:latest
+| Service | Schedule | Purpose |
+|---------|----------|---------|
+| `automated-takeout` | Daily 1:10 AM | Creates new Google Takeout exports via Playwright |
+| `login-helper` | Daily 1:05 AM | Checks Google login status, provides VNC for re-auth |
+| `version-watcher` | Daily 1:00 AM | Updates kasmweb/chrome base image version |
 
-# Test immich_import.py
-docker run --rm \
-  -e IMMICH_API_URL='http://192.168.1.216:2283/api' \
-  -v /mnt/user/backups/google-takeout/raw:/data/photos/import \
-  -v /mnt/user/appdata/takeout-script/cache/.immich_api_key:/run/secrets/immich_api_key:ro \
-  immich-import:latest
-```
+### Utilities
+
+| Service | Schedule | Purpose |
+|---------|----------|---------|
+| `metadata-viewer` | Always running | Web UI for viewing import metadata (port 5050) |
+| `sd-import` | Manual trigger | Imports from SD cards/folders to Immich |
+
+---
 
 ## Key Paths
 
-- `/mnt/user/appdata/takeout-script/` - Application files
-- `/mnt/user/jumpdrive/gdrive/Takeout/` - Synced from Google Drive
-- `/mnt/user/backups/google-takeout/raw/` - Import staging area
-- `/mnt/user/appdata/rclone/` - rclone config
-
-## Deployment Notes
-
-- When updating Python scripts, rebuild the affected Docker image
-- Check logs after deployment to verify operation
-- The PowerShell scripts are for remote deployment from Windows, not for use on this host
-
-
-# Google Takeout to Immich Backup System
-
-## Project Overview
-Automated backup system that syncs Google Takeout exports to an Unraid server and imports Google Photos content into Immich using Docker containers.
-
-## Server Configuration
-- **Platform**: Unraid
-- **Docker**: Running on host network
-- **Immich**: http://192.168.1.216:2283
-- **Immich API**: http://192.168.1.216:2283/api
-- **Immich API Key**: (stored in /mnt/user/appdata/takeout-script/cache/.immich_api_key)
-- **API Key Location**: /mnt/user/appdata/takeout-script/cache/.immich_api_key
-- **User Email**: (configured via Google account)
-
-## Storage Architecture
-
 ### Host Paths
-- **Takeout Sync**: /mnt/user/jumpdrive/gdrive/Takeout (all files from Google Drive Takeout folder)
-- **Photos Import**: /mnt/user/backups/google-takeout/raw (Google Photos zips + media files)
-- **Full Google Drive**: /mnt/user/jumpdrive/gdrive (entire Google Drive excluding Takeout)
-- **rclone Config**: /mnt/user/appdata/rclone/rclone.conf
-- **Project Files**: /mnt/user/appdata/takeout-script/
+| Path | Purpose |
+|------|---------|
+| `/mnt/user/appdata/takeout-script/` | Project files |
+| `/mnt/user/jumpdrive/gdrive/Takeout/` | Synced Takeout exports |
+| `/mnt/user/jumpdrive/gdrive/` | Full Google Drive sync |
+| `/mnt/user/jumpdrive/imports/metadata/` | Import metadata JSON files |
+| `/mnt/user/jumpdrive/imports/extracted/` | Extracted non-photos content |
+| `/mnt/user/appdata/rclone/` | rclone config |
+| `/mnt/user/appdata/gphotos/chromeuser/` | Playwright browser profile |
+| `/mnt/user/appdata/takeout-script/cache/.immich_api_key` | Immich API key |
 
-### Container Paths
-- **takeout-backup**: 
-  - /data/gdrive/Takeout → /mnt/user/jumpdrive/gdrive/Takeout
-  - /data/photos/import/Takeout → /mnt/user/backups/google-takeout/raw
-  - /config/rclone → /mnt/user/appdata/rclone
-  
-- **gdrive-backup**:
-  - /mnt/user/jumpdrive/gdrive → /mnt/user/jumpdrive/gdrive
-  - /config/rclone → /mnt/user/appdata/rclone
-  
-- **immich-import**:
-  - /data/photos/import/Takeout → /mnt/user/backups/google-takeout/raw (read-write for deletion)
-  - /run/secrets/immich_api_key → /mnt/user/appdata/takeout-script/cache/.immich_api_key (read-only)
+### Environment Variables (.env file)
+```bash
+IMMICH_SERVER=http://192.168.1.216:2283
+SERVER_IP=192.168.1.216
+VNC_PASSWORD=<password>
+kasmweb_version=1.18.0
+```
 
-## Docker Services
+---
 
-### takeout-backup
-- **Image**: takeout-backup:latest (Python 3.12-slim + rclone)
-- **Purpose**: Syncs Google Takeout folder, inspects zips for Google Photos content, copies media files
-- **Script**: server_backup.py
-- **Restart**: unless-stopped (continuous monitoring)
-- **Check Interval**: 3600 seconds (1 hour)
-- **rclone Remote**: gdrive:Takeout
+## Shared Module: `shared/takeout_utils.py`
 
-### gdrive-backup
-- **Image**: gdrive-backup:latest (inherits from takeout-backup)
-- **Purpose**: Syncs entire Google Drive excluding Takeout folder
-- **Script**: gdrive_backup.py
-- **Restart**: "no" (cron job only)
-- **Cron Schedule**: Daily at 4:00 AM (`0 4 * * *`)
-- **Log**: /var/log/gdrive-backup.log
+Central utility module used by multiple services:
 
-### immich-import
-- **Image**: immich-import:latest (Python 3.12-slim + immich-go v0.31.0)
-- **Purpose**: Monitors for Google Photos zips, imports to Immich, deletes after successful import
-- **Script**: immich_import.py
-- **Restart**: unless-stopped (continuous monitoring)
-- **Check Interval**: 300 seconds (5 minutes)
-- **Tool**: immich-go CLI for Google Photos import
+### Key Classes
+- **`ImmichGoRunner`**: Unified immich-go upload with retry logic (3 retries, 30s delay)
+- **`ImportProcessor`**: Orchestrates import + extraction + metadata creation
+- **`MetadataBuilder`**: Creates JSON metadata files for each import
 
-## File Processing Logic
+### Key Functions
+- `parse_immich_go_log()`: Parses immich-go JSON logs for per-file results
+- `get_zip_contents()`: Lists files in zip with media detection
+- `extract_non_imported_from_zip()`: Extracts files that weren't imported to Immich
 
-### server_backup.py
-1. Syncs all files from gdrive:Takeout to /data/gdrive/Takeout
-2. Inspects each .zip file using Python zipfile module
-3. Checks for "Google Photos" or "Google Foto's" directories in zip
-4. Copies Google Photos zips to /data/photos/import/Takeout
-5. Copies all media files (photos/videos) to /data/photos/import/Takeout
-6. Preserves directory structure using relative paths
-7. Only copies if destination doesn't exist or sizes differ
+### Configuration via Environment
+```python
+DEFAULT_IMMICH_SERVER = os.getenv("IMMICH_SERVER", "http://192.168.1.216:2283")
+DEFAULT_METADATA_DIR = Path(os.getenv("METADATA_DIR", "/data/metadata"))
+DEFAULT_EXTRACT_DIR = Path(os.getenv("EXTRACT_DIR", "/data/extracted"))
+DEFAULT_MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
+DEFAULT_RETRY_DELAY = int(os.getenv("RETRY_DELAY", "30"))
+```
 
-### immich_import.py
-1. Recursively scans /data/photos/import/Takeout for .zip files
-2. For each zip file:
-   - Runs `immich-go upload from-google-photos -s SERVER -k API_KEY zipfile.zip`
-   - If import succeeds (returncode 0), deletes the zip file
-   - If import fails, leaves zip file for retry on next cycle
-3. No state tracking - processes all zips found on each cycle
-4. Uses Path.rglob("*") to find zips recursively
+---
 
-### gdrive_backup.py
-1. Syncs entire Google Drive to /mnt/user/jumpdrive/gdrive
-2. Excludes Takeout folder using rclone filter: --exclude "Takeout/**"
-3. Runs only when triggered by cron (not continuous)
+## Processing Logic
 
-## Supported Media Formats
-- **Images**: .jpg, .jpeg, .png, .gif, .bmp, .tiff, .tif, .webp, .heic, .heif, .raw, .cr2, .nef, .arw, .dng
-- **Videos**: .mp4, .mov, .avi, .mkv, .wmv, .flv, .webm, .m4v, .3gp, .3g2, .mpeg, .mpg, .mts, .m2ts
+### takeout-backup (server_backup.py)
+1. Runs `rclone move gdrive:Takeout` to local storage
+2. Scans for .zip files
+3. **Google Photos zips**: Left for immich-import to process
+4. **Other zips**: Extracted locally, verified, originals deleted
+5. Saves extraction metadata to `/data/metadata/`
 
-## Deployment
+### immich-import (immich_import.py)
+1. Finds `takeout-*.zip` files in import directory
+2. Groups multi-part archives by prefix (e.g., `takeout-20240427T195310Z-001.zip`)
+3. Runs `immich-go upload from-google-photos` with flags:
+   - `--sync-albums`, `--people-tag`, `--takeout-tag`, `--session-tag`
+   - `--manage-raw-jpeg=StackCoverRaw`, `--manage-burst=Stack`
+4. Parses JSON log for per-file results
+5. Extracts non-Google-Photos content to `/data/extracted/`
+6. Saves metadata JSON with full file manifest
+7. Deletes zips only if import succeeded with no errors
+
+### automated-takeout (automated_takeout.py)
+1. Loads album list from `album_state.yml`
+2. Launches Playwright with persistent Chrome profile
+3. Navigates to Google Takeout, selects Google Photos
+4. Creates exports for albums needing backup:
+   - Large albums (Photos from YYYY): Individual exports
+   - Small albums: Batched together
+5. Exports saved to Google Drive, synced by takeout-backup
+
+---
+
+## Common Operations
 
 ### Build and Deploy All Services
 ```bash
 cd /mnt/user/appdata/takeout-script
-docker-compose down
-docker-compose build
-docker-compose up -d
+docker compose build
+docker compose up -d
 ```
 
 ### Deploy Individual Service
 ```bash
-docker-compose build immich-import
-docker-compose up -d --force-recreate immich-import
+docker compose build immich-import
+docker compose up -d --force-recreate immich-import
 ```
 
 ### Monitor Logs
 ```bash
 docker logs -f takeout-backup
 docker logs -f immich-import
-docker logs --tail 50 gdrive-backup
+docker logs -f automated-takeout
 ```
 
-### Cron Configuration
+### Test Python Scripts
 ```bash
-crontab -l  # View current cron jobs
-crontab -e  # Edit cron jobs
+cd /mnt/user/appdata/takeout-script
+python3 -m py_compile shared/takeout_utils.py
+python3 -m py_compile immich-import/immich_import.py
 ```
 
-## PowerShell Scripts
-
-### create-immich-api-key.ps1
-Automates Immich API key generation via REST API:
-1. Login to Immich with credentials
-2. Create API key with "all" permissions
-3. Save to /mnt/user/appdata/takeout-script/cache/.immich_api_key
-
-### deploy-*.ps1
-Legacy deployment scripts (consider consolidating into one script)
-
-### configure-rclone.ps1
-Sets up rclone with Google Drive OAuth
-
-### test-and-schedule.ps1
-Testing and scheduling utilities
-
-## Docker Images
-
-### Dockerfile (takeout-backup)
-```dockerfile
-FROM python:3.12-slim
-RUN apt-get update && apt-get install -y rclone
-WORKDIR /app
-COPY server_backup.py /app/
-RUN mkdir -p /config/rclone
-CMD ["python", "/app/server_backup.py"]
+### Access Metadata Viewer
+```
+http://192.168.1.216:5050
 ```
 
-### Dockerfile.gdrive (gdrive-backup)
-```dockerfile
-FROM takeout-backup:latest
-WORKDIR /app
-COPY gdrive_backup.py /app/
-CMD ["python", "/app/gdrive_backup.py"]
-```
+### Manual Login (when Google session expires)
+1. Start login-helper with VNC:
+   ```bash
+   docker compose up -d login-helper
+   ```
+2. Open VNC: `http://192.168.1.216:6901`
+3. Log in to Google in the browser
+4. Stop container when done
 
-### Dockerfile.immich (immich-import)
-```dockerfile
-FROM python:3.12-slim
-WORKDIR /tmp
-RUN wget https://github.com/simulot/immich-go/releases/latest/download/immich-go_Linux_x86_64.tar.gz
-RUN tar -xzf immich-go.tar.gz && mv immich-go /usr/local/bin/
-WORKDIR /app
-COPY immich_import.py /app/
-CMD ["python", "/app/immich_import.py"]
-```
+---
 
 ## Troubleshooting
 
-### Check Container Status
+### Check Service Status
 ```bash
-docker ps | grep -E 'takeout-backup|gdrive-backup|immich-import'
-docker inspect <container_id>
+docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 ```
 
-### Verify Volume Mounts
+### Test Immich Connection
 ```bash
-docker exec takeout-backup ls -la /data/gdrive/Takeout
-docker exec immich-import ls -la /data/photos/import/Takeout
+curl -s http://192.168.1.216:2283/api/server/ping
 ```
 
 ### Test rclone Connection
@@ -250,33 +187,75 @@ docker exec immich-import ls -la /data/photos/import/Takeout
 docker exec takeout-backup rclone lsd gdrive:Takeout
 ```
 
-### Test Immich API
-```bash
-curl -s http://192.168.1.216:2283/api/server/ping
-```
-
 ### Check immich-go Version
 ```bash
 docker exec immich-import immich-go --version
 ```
 
+### View Import Logs
+```bash
+ls -la /mnt/user/jumpdrive/imports/metadata/logs/
+```
+
 ### Common Issues
-1. **Read-only filesystem errors**: Ensure volume is not mounted with `:ro` flag
-2. **Missing API key**: Verify /mnt/user/appdata/takeout-script/cache/.immich_api_key exists
-3. **rclone authentication**: Check /mnt/user/appdata/rclone/rclone.conf
-4. **Broken pipe errors**: Network timeout, immich-go will retry on next cycle
-5. **Pending assets warning**: Normal for large uploads, assets will complete in background
 
-## Environment Variables
-- **RCLONE_CONFIG**: Path to rclone.conf (default: /config/rclone/rclone.conf)
-- **CHECK_INTERVAL**: Seconds between sync checks (takeout-backup: 3600, immich-import: 300)
-- **IMMICH_API_URL**: Immich API endpoint (default: http://192.168.1.216:2283/api)
-- **IMMICH_API_KEY_FILE**: Path to API key file (default: /run/secrets/immich_api_key)
+| Issue | Solution |
+|-------|----------|
+| Google login expired | Use login-helper VNC to re-authenticate |
+| immich-go errors | Check logs in metadata/logs/, retry runs automatically |
+| Zip not processing | Verify zip has "Google Photos" folder inside |
+| API key missing | Check `/mnt/user/appdata/takeout-script/cache/.immich_api_key` |
+| rclone auth failed | Re-run rclone config, update `/mnt/user/appdata/rclone/rclone.conf` |
 
-## Current Status
-- All services deployed and running
-- takeout-backup: Actively syncing 929 GB from Google Drive (1% complete, ETA ~4 days)
-- immich-import: Successfully processed 6 zip files, importing photos continuously
-- gdrive-backup: Scheduled for daily execution at 4:00 AM
-- No state tracking - processes all files found on each cycle
-- Files deleted after successful import (requires read-write volume mount)
+---
+
+## Metadata Files
+
+Each import creates a `.metadata.json` file with:
+- Source zip files (names, sizes)
+- Complete file manifest with per-file status
+- immich-go results (uploaded, duplicates, errors)
+- Albums and tags discovered
+- Import timing and command used
+
+Example structure:
+```json
+{
+  "import_type": "immich-go",
+  "source_type": "google-photos",
+  "source_name": "takeout-20240427T195310Z",
+  "zip_files": [{"name": "...", "size": 1234567}],
+  "files": [{"filename": "IMG_001.jpg", "immich_status": "uploaded", ...}],
+  "summary": {"uploaded_success": 150, "server_duplicate": 20, "errors": 0},
+  "immich_go_results": {...}
+}
+```
+
+---
+
+## Docker Image Details
+
+| Image | Base | Key Tools |
+|-------|------|-----------|
+| `takeout-backup` | python:3.12-slim | rclone, unzip |
+| `immich-import` | python:3.12-slim | immich-go (latest) |
+| `gdrive-backup` | python:3.12-slim | rclone |
+| `automated-takeout` | python:3.12-slim | playwright, chromium |
+| `login-helper` | kasmweb/chrome | playwright, VNC |
+| `metadata-viewer` | python:3.12-slim | flask |
+| `sd-import` | python:3.12-slim | immich-go |
+| `version-watcher` | python:3.12-slim | requests |
+
+---
+
+## Scheduling (Chadburn Labels)
+
+Services use Docker labels for scheduling:
+```yaml
+labels:
+  - "chadburn.enabled=true"
+  - "chadburn.job-exec.SERVICE.schedule=CRON_EXPRESSION"
+  - "chadburn.job-exec.SERVICE.command=python /app/script.py"
+```
+
+Requires Chadburn container running separately to execute scheduled jobs.

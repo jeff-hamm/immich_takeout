@@ -1,16 +1,20 @@
 services:
   takeout-backup:
     build:
-      context: ./takeout-backup
+      context: .
+      dockerfile: takeout-backup/Dockerfile
     image: takeout-backup:latest
     container_name: takeout-backup
     restart: "no"
     environment:
       - RCLONE_CONFIG=/config/rclone/rclone.conf
+      - RCLONE_REMOTE=${RCLONE_TAKEOUT_PATH:-${RCLONE_REMOTE:-gdrive}:Takeout}
+      - GDRIVE_DIR=/data/gdrive/Takeout
+      - METADATA_DIR=/data/metadata
     volumes:
-      - /mnt/user/jumpdrive/gdrive/Takeout:/data/gdrive/Takeout
-      - /mnt/user/backups/google-takeout/raw:/data/photos/import/Takeout
-      - /mnt/user/appdata/rclone:/config/rclone
+      - ${GDRIVE_PATH}/Takeout:/data/gdrive/Takeout
+      - ${RCLONE_CONFIG}:/config/rclone/rclone.conf:ro
+      - ${IMPORTS_PATH}/metadata:/data/metadata
     network_mode: bridge
     labels:
       - "chadburn.enabled=true"
@@ -25,9 +29,11 @@ services:
     restart: "no"
     environment:
       - RCLONE_CONFIG=/config/rclone/rclone.conf
+      - RCLONE_REMOTE=${RCLONE_GDRIVE_PATH:-${RCLONE_REMOTE:-gdrive:}}
     volumes:
-      - /mnt/user/jumpdrive/gdrive:/mnt/user/jumpdrive/gdrive
-      - /mnt/user/appdata/rclone:/config/rclone
+      - ${GDRIVE_PATH}:/data/gdrive
+      - ${STATE_PATH}/gdrive:/data/state
+      - ${RCLONE_CONFIG}:/config/rclone/rclone.conf:ro
     network_mode: bridge
     labels:
       - "chadburn.enabled=true"
@@ -36,17 +42,23 @@ services:
 
   immich-import:
     build:
-      context: ./immich-import
+      context: .
+      dockerfile: immich-import/Dockerfile
     image: immich-import:latest
     container_name: immich-import
     restart: "no"
     environment:
-      - IMMICH_API_URL=${IMMICH_SERVER}/api
+      - IMMICH_SERVER=${IMMICH_SERVER}
       - IMMICH_API_KEY_FILE=/run/secrets/immich_api_key
+      - IMPORT_DIR=/data/import
+      - METADATA_DIR=/data/metadata
+      - EXTRACT_DIR=/data/extracted
+      - DELETE_AFTER_IMPORT=true
     volumes:
-      - /mnt/user/jumpdrive/gdrive/Takeout:/data/photos/import
-      - /mnt/user/appdata/takeout-script/cache/.immich_api_key:/run/secrets/immich_api_key:ro
-      - /mnt/user/appdata/takeout-script/cache:/cache
+      - ${GDRIVE_PATH}/Takeout:/data/import/Takeout
+      - ${STATE_PATH}/.immich_api_key:/run/secrets/immich_api_key:ro
+      - ${IMPORTS_PATH}/metadata:/data/metadata
+      - ${IMPORTS_PATH}:/data/extracted
     network_mode: bridge
     labels:
       - "chadburn.enabled=true"
@@ -66,9 +78,10 @@ services:
       - VNC_PORT=6901
       - TAKEOUT_URL=https://takeout.google.com/settings/takeout/custom/photos
       - SLEEP_MULTIPLIER=1
+      - GOOGLE_PASSWORD=${GOOGLE_PASSWORD:-}
     volumes:
-      - /mnt/user/appdata/gphotos/chromeuser:/browser-profile
-      - /mnt/user/appdata/takeout-script/cache/album_state.yml:/app/album_state.yml
+      - ${STATE_PATH}/chromeuser:/browser-profile
+      - ${STATE_PATH}/album_state.yml:/app/album_state.yml
     network_mode: bridge
     labels:
       - "chadburn.enabled=true"
@@ -94,7 +107,7 @@ services:
       - LOGIN_REDIRECT_URL=accounts.google.com
       - LOGIN_PAGE_LOCATOR=input[type="email"]
     volumes:
-      - /mnt/user/appdata/gphotos/chromeuser:/home/kasm-user/.config/google-chrome
+      - ${STATE_PATH}/chromeuser:/home/kasm-user/.config/google-chrome
     ports:
       - "6901:6901"
     network_mode: bridge
@@ -119,11 +132,50 @@ services:
       - ENV_VAR_NAME=kasmweb_version
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - /mnt/user/appdata/takeout-script/docker-compose.yml:/app/project/docker-compose.yml:ro
-      - /mnt/user/appdata/takeout-script/.env:/app/project/.env:rw
+      - ./docker-compose.yml:/app/project/docker-compose.yml:ro
+      - ./.env:/app/project/.env:rw
     working_dir: /app
     network_mode: bridge
     labels:
       - "chadburn.enabled=true"
       - "chadburn.job-exec.version-watcher.schedule=0 1 * * *"
       - "chadburn.job-exec.version-watcher.command=python /app/version_watcher.py"
+
+  metadata-viewer:
+    build:
+      context: ./metadata-viewer
+    image: metadata-viewer:latest
+    container_name: metadata-viewer
+    restart: unless-stopped
+    environment:
+      - METADATA_DIR=/data/metadata
+    volumes:
+      - ${IMPORTS_PATH}/metadata:/data/metadata:ro
+    ports:
+      - "5050:5000"
+    network_mode: bridge
+    labels:
+      - "net.unraid.docker.webui=http://[IP]:[PORT:5050]"
+      - "net.unraid.docker.icon=https://raw.githubusercontent.com/immich-app/immich/main/docs/static/img/favicon.png"
+      - "net.unraid.docker.managed=composeman"
+
+  sd-import:
+    # Uses the immich-import image in 'folder' mode
+    image: immich-import:latest
+    container_name: sd-import
+    restart: "no"
+    depends_on:
+      - immich-import  # Ensures image is built
+    environment:
+      - IMMICH_API_URL=${IMMICH_SERVER}/api
+      - IMMICH_API_KEY_FILE=/run/secrets/immich_api_key
+      - METADATA_DIR=/data/metadata
+      - DELETE_AFTER_IMPORT=false
+    volumes:
+      - /mnt/user/imports/sd-cards:/data/import
+      - ${STATE_PATH}/.immich_api_key:/run/secrets/immich_api_key:ro
+      - ${IMPORTS_PATH}/metadata:/data/metadata
+    network_mode: bridge
+    command: ["python", "/app/immich_import.py", "folder", "--source-type", "sd-card", "--copy-failed"]
+    labels:
+      - "net.unraid.docker.managed=composeman"
