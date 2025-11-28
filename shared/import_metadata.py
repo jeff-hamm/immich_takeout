@@ -54,6 +54,7 @@ class ImportMetadata(dict):
         self._metadata_dir = metadata_dir or DEFAULT_METADATA_DIR
         self._metadata_dir.mkdir(parents=True, exist_ok=True)
         
+        # Set the file path with timestamp suffix for uniqueness
         
         self.update({
             "status": "running",
@@ -61,6 +62,7 @@ class ImportMetadata(dict):
             "source_type": source_type,
             "start_time": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         })
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         extra_fields = extra_fields or {}
         if zip_files:
             self.zip_files = zip_files
@@ -69,7 +71,7 @@ class ImportMetadata(dict):
                 self.extract_path = extract_dir     
                 self._init_from_extraction(import_type, source_type, extract_dir)
             else:
-                self['immich_go_log'] = f"logs/{self.source_name}.immich-go.log"
+                self['immich_go_log'] = f"logs/{self.source_name}.immich-go.{timestamp}.log"
         elif folder_path:
             self.import_path = folder_path
             self.source_name = self._init_from_folder(import_type, source_type, folder_path)
@@ -80,8 +82,8 @@ class ImportMetadata(dict):
         if extra_fields:
             self.update(extra_fields)
         
-        # Set the file path
-        self._file_path = self._metadata_dir / f"{self.source_name}.metadata.json"
+        self._file_path = self._metadata_dir / f"{self.source_name}.{timestamp}.metadata.json"
+
     
     def _init_zip_files(self, zip_files: list[Path]) -> None:
         """
@@ -138,7 +140,7 @@ class ImportMetadata(dict):
             "source_path": str(folder_path),
             "total_size": total_size,
             "file_count": file_count,
-            "immich_go_log": f"logs/upload-{folder_path.name}-{timestamp}.log",
+            "immich_go_log": f"logs/upload-{folder_path.name}.immich-go.{timestamp}.log",
         })
         return source_name
     
