@@ -54,8 +54,8 @@ def get_zip_media_files(zip_files):
     media_files = []
     for zip_path in zip_files:
         contents = get_zip_contents(zip_path)
-        for info in contents:
-            if is_google_photos_path(info['path']) and info['is_media']:
+        for path, info in contents.items():
+            if is_google_photos_path(path) and info['is_media']:
                 media_files.append({
                     'filename': info['filename'],
                     'size': info['size'],
@@ -142,19 +142,6 @@ def verify_import(zip_files, runner: ImmichGoRunner):
     except Exception as e:
         print(f"[ERROR] Failed to verify import: {e}")
         return False
-
-
-def get_all_zip_contents(zip_files):
-    """Get complete manifest of all files in all zip parts."""
-    all_files = []
-    for zip_path in zip_files:
-        contents = get_zip_contents(zip_path)
-        for info in contents:
-            info['zip_file'] = zip_path.name
-            info['disposition'] = None  # Will be set during processing
-            all_files.append(info)
-    return all_files
-
 
 def is_valid_zip(zip_path: Path) -> bool:
     """Check if a zip file is valid and not corrupted."""

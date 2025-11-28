@@ -28,12 +28,31 @@ def load_metadata_files():
     if not METADATA_DIR.exists():
         return metadata_files
     
-    for f in sorted(METADATA_DIR.glob("*.metadata.json"), reverse=True):
+    now = datetime.now()
+    
+    for f in METADATA_DIR.glob("*.metadata.json"):
         try:
             with open(f) as mf:
                 data = json.load(mf)
                 data['_filename'] = f.name
                 data['_path'] = str(f)
+                
+                # Check for timeout: if status is 'running' and update_time is older than 5 minutes
+                if data.get('status') == 'running' and 'update_time' in data:
+                    try:
+                        update_time = datetime.fromisoformat(data['update_time'].replace('Z', '+00:00'))
+                        # Make now timezone-aware if update_time is
+                        if update_time.tzinfo is not None:
+                            from datetime import timezone
+                            now_aware = datetime.now(timezone.utc)
+                            age_seconds = (now_aware - update_time).total_seconds()
+                        else:
+                            age_seconds = (now - update_time).total_seconds()
+                        
+                        if age_seconds > 300:  # 5 minutes
+                            data['status'] = 'timeout'
+                    except (ValueError, TypeError):
+                        pass
                 
                 # Handle both old zip_file and new zip_files format
                 if 'zip_files' in data:
@@ -56,6 +75,12 @@ def load_metadata_files():
                 metadata_files.append(data)
         except Exception as e:
             print(f"Error loading {f}: {e}")
+    
+    # Sort by start_time descending (newest first), falling back to extraction_date or empty string
+    metadata_files.sort(
+        key=lambda m: m.get('start_time') or m.get('extraction_date') or '',
+        reverse=True
+    )
     
     return metadata_files
 
