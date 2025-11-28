@@ -12,7 +12,7 @@ if (_script_dir / "shared").exists():
     sys.path.insert(0, str(_script_dir / "shared"))
 else:
     sys.path.insert(0, str(_script_dir.parent / "shared"))
-from takeout_utils import MetadataBuilder
+from import_metadata import ImportMetadata
 
 # CONFIGURABLE PATHS (mapped in container)
 RCLONE_REMOTE = os.getenv("RCLONE_REMOTE", "gdrive:Takeout")  # rclone remote:path where Takeout exports appear
@@ -20,18 +20,19 @@ GDRIVE_DIR = Path(os.getenv("GDRIVE_DIR", "/data/gdrive/Takeout"))  # Primary sy
 METADATA_DIR = Path(os.getenv("METADATA_DIR", "/data/metadata"))  # Extraction metadata directory
 DELETE_AFTER_EXTRACT = os.getenv("DELETE_AFTER_EXTRACT", "true").lower() == "true"
 
-# Initialize metadata builder
-metadata_builder = MetadataBuilder(METADATA_DIR)
-
 
 def save_extraction_metadata(zip_path, extract_dir, related_parts=None):
-    """Save metadata about extracted files to a JSON file using shared module."""
+    """Save metadata about extracted files to a JSON file using ImportMetadata."""
     try:
-        metadata_builder.create_extraction_only_metadata(
-            zip_path=zip_path,
+        parts = related_parts if related_parts else [zip_path]
+        metadata = ImportMetadata(
+            import_type='extract',
+            source_type='google-takeout',
+            metadata_dir=METADATA_DIR,
+            zip_files=parts,
             extract_dir=extract_dir,
-            related_parts=related_parts
         )
+        metadata.save()
         return True
     except Exception as e:
         print(f"[WARNING] Failed to save metadata: {e}")

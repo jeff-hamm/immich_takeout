@@ -251,6 +251,49 @@
         <div class="info-grid">
             <div class="info-card">
                 <h3>Import Information</h3>
+                {% if metadata.status %}
+                <div class="info-row">
+                    <span class="info-label">Status</span>
+                    <span class="info-value">
+                        {% set status = metadata.status %}
+                        {% if status == 'running' %}
+                        <span style="color: var(--accent-blue);">⏳ Running</span>
+                        {% elif status == 'completed' %}
+                        <span style="color: var(--accent-green);">✓ Completed</span>
+                        {% elif status == 'completed_with_errors' %}
+                        <span style="color: var(--accent-yellow);">⚠ Completed with Errors</span>
+                        {% elif status == 'errored' or status == 'failed' %}
+                        <span style="color: var(--accent);">✗ Failed</span>
+                        {% else %}
+                        {{ status }}
+                        {% endif %}
+                    </span>
+                </div>
+                {% endif %}
+                {% if metadata.start_time %}
+                <div class="info-row">
+                    <span class="info-label">Started</span>
+                    <span class="info-value">{{ metadata.start_time[:19].replace('T', ' ') }}</span>
+                </div>
+                {% endif %}
+                {% if metadata.end_time %}
+                <div class="info-row">
+                    <span class="info-label">Completed</span>
+                    <span class="info-value">{{ metadata.end_time[:19].replace('T', ' ') }}</span>
+                </div>
+                {% endif %}
+                {% if metadata.duration_seconds %}
+                <div class="info-row">
+                    <span class="info-label">Duration</span>
+                    <span class="info-value">{{ (metadata.duration_seconds / 60)|round(1) }} minutes</span>
+                </div>
+                {% endif %}
+                {% if metadata.error_details %}
+                <div class="info-row" style="background: rgba(233, 69, 96, 0.2); padding: 10px; border-radius: 6px;">
+                    <span class="info-label">Error</span>
+                    <span class="info-value" style="color: var(--accent);">{{ metadata.error_details }}</span>
+                </div>
+                {% endif %}
                 {% if metadata.zip_files %}
                 <div class="info-row">
                     <span class="info-label">Zip Files</span>

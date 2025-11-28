@@ -170,7 +170,6 @@ def is_valid_zip(zip_path: Path) -> bool:
 def filter_valid_zips(zip_files: list[Path]) -> tuple[list[Path], list[Path]]:
     """
     Filter zip files, returning (valid_zips, invalid_zips).
-    Invalid zips are renamed to .partial extension.
     """
     valid = []
     invalid = []
@@ -180,13 +179,6 @@ def filter_valid_zips(zip_files: list[Path]) -> tuple[list[Path], list[Path]]:
             valid.append(zip_path)
         else:
             print(f"[WARNING] Corrupted/incomplete zip: {zip_path.name}")
-            # Rename to .partial
-            partial_path = zip_path.with_suffix('.zip.partial')
-            try:
-                zip_path.rename(partial_path)
-                print(f"[INFO] Renamed to: {partial_path.name}")
-            except Exception as e:
-                print(f"[ERROR] Failed to rename {zip_path.name}: {e}")
             invalid.append(zip_path)
     
     return valid, invalid
@@ -202,8 +194,28 @@ def find_takeout_exports():
     
     # Group zip files by their takeout export prefix (e.g., takeout-20240427T195310Z)
     exports = {}
+    
+    # Find both .zip and .partial files
     all_zips = list(TAKEOUT_DIR.rglob(TAKEOUT_FILE_FILTER))
-    print(f"[INFO] Found {len(all_zips)} total zip file(s)")
+    # Also find .partial files based on the filter pattern
+    partial_filter = TAKEOUT_FILE_FILTER + ".partial"
+    all_partials = list(TAKEOUT_DIR.rglob(partial_filter))
+    
+    print(f"[INFO] Found {len(all_zips)} zip file(s), {len(all_partials)} partial file(s)")
+    
+    # Build a set of partial file base names (without .partial suffix)
+    # e.g., "takeout-20240427T195310Z-002.zip.partial" -> "takeout-20240427T195310Z-002.zip"
+    partial_bases = set()
+    for partial_path in all_partials:
+        if partial_path.name.endswith('.partial'):
+            base_name = partial_path.name[:-8]  # Remove ".partial"
+            partial_bases.add(base_name)
+    
+    # Build a set of existing valid zip names
+    valid_zip_names = set()
+    for zip_path in all_zips:
+        if zip_path.is_file() and is_valid_zip(zip_path):
+            valid_zip_names.add(zip_path.name)
     
     for zip_path in all_zips:
         if not zip_path.is_file():
@@ -215,24 +227,52 @@ def find_takeout_exports():
         if len(parts) == 2:
             export_prefix = parts[0]
             if export_prefix not in exports:
-                exports[export_prefix] = []
-            exports[export_prefix].append(zip_path)
+                exports[export_prefix] = {'zips': [], 'has_incomplete_partial': False}
+            exports[export_prefix]['zips'].append(zip_path)
+    
+    # Also register exports that only have .partial files (no .zip yet)
+    for partial_path in all_partials:
+        if partial_path.name.endswith('.partial'):
+            base_name = partial_path.name[:-8]  # Remove ".partial"
+            stem = base_name[:-4]  # Remove ".zip"
+            parts = stem.rsplit('-', 1)
+            if len(parts) == 2:
+                export_prefix = parts[0]
+                if export_prefix not in exports:
+                    exports[export_prefix] = {'zips': [], 'has_incomplete_partial': False}
+                # Check if this partial has a corresponding valid zip
+                if base_name not in valid_zip_names:
+                    exports[export_prefix]['has_incomplete_partial'] = True
+    
+    # Check existing exports for partials without valid zips
+    for export_prefix, export_data in exports.items():
+        for zip_path in export_data['zips']:
+            # Check if there's a .partial for this zip but the zip is invalid
+            if zip_path.name in partial_bases and not is_valid_zip(zip_path):
+                export_data['has_incomplete_partial'] = True
     
     print(f"[INFO] Found {len(exports)} unique takeout export(s)")
     
-    # Check each export to see if it contains Google Photos
+    # Check each export to see if it contains Google Photos (sorted newest first)
     exports_to_import = []
-    for export_prefix, zip_files in sorted(exports.items()):
+    for export_prefix, export_data in sorted(exports.items(), reverse=True):
+        zip_files = export_data['zips']
         zip_files.sort()
         
-        # Filter out corrupted/incomplete zips first
+        # Skip if there are incomplete partials (partial exists but no valid zip)
+        if export_data['has_incomplete_partial']:
+            print(f"[WARNING] Export {export_prefix}: Has .partial file(s) without valid .zip, skipping (download in progress)")
+            continue
+        
+        # Filter out corrupted/incomplete zips
         valid_zips, invalid_zips = filter_valid_zips(zip_files)
         
         if invalid_zips:
-            print(f"[WARNING] Export {export_prefix}: {len(invalid_zips)} corrupted zip(s) renamed to .partial")
+            print(f"[WARNING] Export {export_prefix}: {len(invalid_zips)} corrupted/incomplete zip(s), skipping entire export")
+            continue
         
         if not valid_zips:
-            print(f"[WARNING] Export {export_prefix}: No valid zips remaining, skipping")
+            print(f"[WARNING] Export {export_prefix}: No valid zips, skipping")
             continue
         
         # Check if any valid part contains Google Photos

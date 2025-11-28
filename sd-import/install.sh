@@ -1,11 +1,15 @@
 #!/bin/bash
 # SD Card Auto-Import Installer for Unraid
 # This script installs the SD card auto-import system on a fresh Unraid system
+# Idempotent: safe to run multiple times
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BOOT_CONFIG="/boot/config"
+ENV_FILE="$SCRIPT_DIR/../.env"
+API_KEY_FILE="$SCRIPT_DIR/../state/.immich_api_key"
+PROJECT_DIR="$SCRIPT_DIR/.."
 
 echo "=========================================="
 echo "SD Card Auto-Import Installer for Unraid"
@@ -18,27 +22,52 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
-# Ensure scripts are executable
+# Ensure scripts are executable (idempotent)
 echo "Setting script permissions..."
-chmod +x "$SCRIPT_DIR/sd-card-import.sh"
-chmod +x "$SCRIPT_DIR/immich-go-upload.sh"
+[ -f "$SCRIPT_DIR/sd-card-import.sh" ] && chmod +x "$SCRIPT_DIR/sd-card-import.sh"
+[ -f "$SCRIPT_DIR/immich-go-upload.sh" ] && chmod +x "$SCRIPT_DIR/immich-go-upload.sh"
 
-# Install to runtime locations via symlinks
+# Install to runtime locations via symlinks (idempotent - ln -sf overwrites)
 echo "Creating symlinks in /usr/local/bin/..."
-ln -sf "$SCRIPT_DIR/sd-card-import.sh" /usr/local/bin/sd-card-import.sh
-ln -sf "$SCRIPT_DIR/immich-go-upload.sh" /usr/local/bin/immich-go-upload
-ln -sf "$SCRIPT_DIR/../.env" /usr/local/bin/immich-go-upload.env
+[ -f "$SCRIPT_DIR/sd-card-import.sh" ] && ln -sf "$SCRIPT_DIR/sd-card-import.sh" /usr/local/bin/sd-card-import.sh
+[ -f "$SCRIPT_DIR/immich-go-upload.sh" ] && ln -sf "$SCRIPT_DIR/immich-go-upload.sh" /usr/local/bin/immich-go-upload
+[ -f "$ENV_FILE" ] && ln -sf "$ENV_FILE" /usr/local/bin/immich-go-upload.env
 
-# Install udev rule
-echo "Installing udev rule..."
-cp "$SCRIPT_DIR/99-sd-card-import.rules" /etc/udev/rules.d/
-udevadm control --reload-rules
+# Install udev rule only if it exists and has a valid serial configured
+SD_RULES_FILE="$SCRIPT_DIR/99-sd-card-import.rules"
+if [ -f "$SD_RULES_FILE" ]; then
+    # Check if the rules file has a real serial (not a placeholder)
+    if grep -qP 'ID_SERIAL=="[^"]+"' "$SD_RULES_FILE" 2>/dev/null; then
+        echo "Installing udev rule..."
+        cp "$SD_RULES_FILE" /etc/udev/rules.d/
+        udevadm control --reload-rules
+    else
+        echo "Skipping udev rule (no SD reader serial configured)"
+    fi
+else
+    echo "Skipping udev rule (rules file not found)"
+fi
 
-# Backup existing go script if it exists
+# Source .env file to get configuration
+if [ -f "$ENV_FILE" ]; then
+    echo "Loading configuration from .env file..."
+    source <(grep -v '^#' "$ENV_FILE" | grep -v '^$' | sed 's/^/export /')
+else
+    echo "Warning: .env file not found at $ENV_FILE"
+fi
+
+# Load API key from file
+if [ -f "$API_KEY_FILE" ]; then
+    IMMICH_API_KEY=$(cat "$API_KEY_FILE" | tr -d '\n\r ')
+fi
+
+# Backup existing go script if it exists (only once per day to avoid backup spam)
 if [ -f "$BOOT_CONFIG/go" ]; then
-    BACKUP_FILE="$BOOT_CONFIG/go.backup.$(date +%Y%m%d_%H%M%S)"
-    echo "Backing up existing go script to: $BACKUP_FILE"
-    cp "$BOOT_CONFIG/go" "$BACKUP_FILE"
+    BACKUP_FILE="$BOOT_CONFIG/go.backup.$(date +%Y%m%d)"
+    if [ ! -f "$BACKUP_FILE" ]; then
+        echo "Backing up existing go script to: $BACKUP_FILE"
+        cp "$BOOT_CONFIG/go" "$BACKUP_FILE"
+    fi
 else
     echo "Creating new go script..."
     cat > "$BOOT_CONFIG/go" << 'EOF'
@@ -48,24 +77,6 @@ else
 EOF
     chmod +x "$BOOT_CONFIG/go"
 fi
-
-# Source .env file to get configuration
-ENV_FILE="$SCRIPT_DIR/../.env"
-if [ -f "$ENV_FILE" ]; then
-    echo "Loading configuration from .env file..."
-    source <(grep -v '^#' "$ENV_FILE" | grep -v '^$' | sed 's/^/export /')
-else
-    echo "Warning: .env file not found at $ENV_FILE"
-fi
-
-# Load API key from file
-API_KEY_FILE="$SCRIPT_DIR/../state/.immich_api_key"
-if [ -f "$API_KEY_FILE" ]; then
-    IMMICH_API_KEY=$(cat "$API_KEY_FILE" | tr -d '\n\r ')
-fi
-
-# Project directory for docker builds
-PROJECT_DIR="$SCRIPT_DIR/.."
 
 # Build immich-import Docker image if not already present
 if ! docker image inspect immich-import:latest >/dev/null 2>&1; then
@@ -78,22 +89,33 @@ if ! docker image inspect immich-import:latest >/dev/null 2>&1; then
         "$PROJECT_DIR"
     echo "immich-import image built successfully"
 else
-    echo "immich-import image already exists"
+    echo "immich-import image already exists (use docker compose build to rebuild)"
 fi
 
-# Check if go script already has our installation commands
-if grep -q "sd-card-import.sh" "$BOOT_CONFIG/go"; then
-    echo "SD card import is already in go script, skipping..."
-else
-    echo "Adding SD card import to go script..."
-    cat >> "$BOOT_CONFIG/go" << EOF
+# Update go script (idempotent - remove old block and add fresh one)
+# First, remove any existing SD Card Auto-Import block
+if [ -f "$BOOT_CONFIG/go" ]; then
+    # Create temp file without our block
+    sed '/# SD Card Auto-Import/,/^fi$/d' "$BOOT_CONFIG/go" > "$BOOT_CONFIG/go.tmp" || cp "$BOOT_CONFIG/go" "$BOOT_CONFIG/go.tmp"
+    mv "$BOOT_CONFIG/go.tmp" "$BOOT_CONFIG/go"
+    chmod +x "$BOOT_CONFIG/go"
+fi
+
+# Add fresh SD Card Auto-Import block
+echo "Updating go script with SD card import configuration..."
+cat >> "$BOOT_CONFIG/go" << EOF
 
 # SD Card Auto-Import - create symlinks to persistent scripts
-ln -sf "$SCRIPT_DIR/sd-card-import.sh" /usr/local/bin/sd-card-import.sh
-ln -sf "$SCRIPT_DIR/immich-go-upload.sh" /usr/local/bin/immich-go-upload
-ln -sf "$ENV_FILE" /usr/local/bin/immich-go-upload.env
-cp "$SCRIPT_DIR/99-sd-card-import.rules" /etc/udev/rules.d/
-udevadm control --reload-rules
+[ -f "$SCRIPT_DIR/sd-card-import.sh" ] && ln -sf "$SCRIPT_DIR/sd-card-import.sh" /usr/local/bin/sd-card-import.sh
+[ -f "$SCRIPT_DIR/immich-go-upload.sh" ] && ln -sf "$SCRIPT_DIR/immich-go-upload.sh" /usr/local/bin/immich-go-upload
+[ -f "$ENV_FILE" ] && ln -sf "$ENV_FILE" /usr/local/bin/immich-go-upload.env
+
+# Install udev rule if configured
+SD_RULES_FILE="$SCRIPT_DIR/99-sd-card-import.rules"
+if [ -f "\$SD_RULES_FILE" ] && grep -qP 'ID_SERIAL=="[^"]+"' "\$SD_RULES_FILE" 2>/dev/null; then
+    cp "\$SD_RULES_FILE" /etc/udev/rules.d/
+    udevadm control --reload-rules 2>/dev/null || true
+fi
 
 # Source .env for configuration
 if [ -f "$ENV_FILE" ]; then
@@ -104,18 +126,7 @@ fi
 if [ -f "$API_KEY_FILE" ]; then
     export IMMICH_API_KEY=\$(cat "$API_KEY_FILE" | tr -d '\n\r ')
 fi
-
-# Build immich-import Docker image if not already present
-if ! docker image inspect immich-import:latest >/dev/null 2>&1; then
-    docker build \
-        --build-arg IMMICH_SERVER="\${IMMICH_SERVER:-http://192.168.1.216:2283}" \
-        --build-arg IMMICH_API_KEY="\${IMMICH_API_KEY:-}" \
-        -t immich-import:latest \
-        -f "$PROJECT_DIR/immich-import/Dockerfile" \
-        "$PROJECT_DIR"
-fi
 EOF
-fi
 
 # Create import directory
 echo "Creating import directory..."

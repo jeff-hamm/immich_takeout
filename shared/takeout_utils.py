@@ -17,6 +17,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
+# Import ImportMetadata class - handle both package and direct import
+try:
+    from .import_metadata import ImportMetadata
+except ImportError:
+    from import_metadata import ImportMetadata
+
 # Media file extensions that Immich supports
 MEDIA_EXTENSIONS = {
     '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.tiff', '.tif', '.webp',
@@ -325,259 +331,28 @@ def copy_log_to_metadata(log_file_path: str | Path, metadata_dir: Path) -> Optio
         return None
 
 
-class MetadataBuilder:
-    """Builder class for creating import metadata files."""
+def create_extraction_only_metadata(
+    zip_path: Path,
+    extract_dir: Path,
+    metadata_dir: Optional[Path] = None,
+    related_parts: Optional[list[Path]] = None
+) -> Path:
+    """
+    Create metadata for non-Google-Photos zip extraction.
+    This is a standalone function for extraction-only operations.
     
-    def __init__(self, metadata_dir: Optional[Path] = None):
-        self.metadata_dir = metadata_dir or DEFAULT_METADATA_DIR
-        self.metadata_dir.mkdir(parents=True, exist_ok=True)
+    Delegates to ImportMetadata with extract_dir parameter.
+    """
+    parts = related_parts if related_parts else [zip_path]
     
-    def create_extraction_metadata(
-        self,
-        source_name: str,
-        import_type: str,  # 'extract', 'immich-go', 'sd-import'
-        source_type: str,  # 'google-takeout', 'google-photos', 'sd-card', 'folder'
-        files: list[dict],
-        total_size: int = 0,
-        extra_fields: Optional[dict] = None
-    ) -> dict:
-        """Create base metadata structure."""
-        metadata = {
-            "import_type": import_type,
-            "source_type": source_type,
-            "source_name": source_name,
-            "total_size": total_size,
-            "extraction_date": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            "total_files": len(files),
-            "files": files,
-        }
-        
-        if extra_fields:
-            metadata.update(extra_fields)
-        
-        # Calculate summary
-        metadata["summary"] = self._calculate_summary(files, import_type)
-        
-        return metadata
-    
-    def _calculate_summary(self, files: list[dict], import_type: str) -> dict:
-        """Calculate summary statistics from file list."""
-        summary = {
-            "total": len(files),
-            "media_files": sum(1 for f in files if f.get('is_media', False)),
-            "json_files": sum(1 for f in files if f.get('is_json', False)),
-        }
-        
-        if import_type == 'immich-go' or import_type == 'sd-import':
-            summary.update({
-                "uploaded_success": sum(1 for f in files if f.get('immich_status') == 'uploaded'),
-                "server_duplicate": sum(1 for f in files if f.get('immich_status') == 'server_duplicate'),
-                "local_duplicate": sum(1 for f in files if f.get('immich_status') == 'local_duplicate'),
-                "server_better": sum(1 for f in files if f.get('immich_status') == 'server_better'),
-                "upgraded": sum(1 for f in files if f.get('immich_status') == 'upgraded'),
-                "errors": sum(1 for f in files if f.get('immich_status') == 'error'),
-            })
-        elif import_type == 'extract':
-            summary.update({
-                "extracted": sum(1 for f in files if f.get('disposition') == 'extracted'),
-            })
-        
-        return summary
-    
-    def save_metadata(self, metadata: dict, filename: str) -> Path:
-        """Save metadata to JSON file."""
-        # Ensure filename ends with .metadata.json
-        if not filename.endswith('.metadata.json'):
-            filename = f"{filename}.metadata.json"
-        
-        metadata_file = self.metadata_dir / filename
-        
-        try:
-            with open(metadata_file, 'w') as f:
-                json.dump(metadata, f, indent=2)
-            print(f"[INFO] Saved metadata: {metadata_file.name}")
-            return metadata_file
-        except Exception as e:
-            print(f"[ERROR] Failed to save metadata: {e}")
-            raise
-    
-    def create_zip_import_metadata(
-        self,
-        zip_files: list[Path],
-        export_prefix: str,
-        immich_results: Optional[dict] = None,
-        log_file_path: Optional[str] = None,
-        immich_go_command: Optional[str] = None
-    ) -> Path:
-        """Create single aggregated metadata for Google Photos zip import via immich-go."""
-        # Copy log file
-        relative_log_path = None
-        if log_file_path:
-            relative_log_path = copy_log_to_metadata(log_file_path, self.metadata_dir)
-        
-        # Build zip_files array with name and size
-        zip_files_info = []
-        total_size = 0
-        for zip_path in zip_files:
-            size = zip_path.stat().st_size if zip_path.exists() else 0
-            total_size += size
-            zip_files_info.append({
-                'name': zip_path.name,
-                'size': size
-            })
-        
-        # Get all file contents from all zips
-        all_files = []
-        for zip_path in zip_files:
-            contents = get_zip_contents(zip_path)
-            for f in contents:
-                f['zip_file'] = zip_path.name
-                f['disposition'] = 'pending'
-                if f.get('is_google_photos') and f.get('is_media'):
-                    f['disposition'] = 'imported_to_immich'
-                elif f.get('is_json'):
-                    f['disposition'] = 'skipped_json'
-                elif not f.get('is_google_photos'):
-                    f['disposition'] = 'extracted'
-                else:
-                    f['disposition'] = 'skipped_other'
-            all_files.extend(contents)
-        
-        # Apply immich-go results if available
-        if immich_results:
-            apply_immich_results_to_manifest(all_files, immich_results)
-        
-        # Create single aggregated metadata
-        metadata = self.create_extraction_metadata(
-            source_name=export_prefix,
-            import_type='immich-go',
-            source_type='google-photos',
-            files=all_files,
-            total_size=total_size,
-            extra_fields={
-                'zip_files': zip_files_info,
-                'export_prefix': export_prefix,
-                'immich_go_log': relative_log_path,
-                'immich_go_command': immich_go_command,
-                'immich_go_results': immich_results.get('summary') if immich_results else None,
-            }
-        )
-        
-        # Save with export prefix as filename
-        saved_file = self.save_metadata(metadata, export_prefix)
-        return saved_file
-    
-    def create_folder_import_metadata(
-        self,
-        folder_path: Path,
-        source_type: str,  # 'sd-card', 'folder'
-        immich_results: Optional[dict] = None,
-        log_file_path: Optional[str] = None,
-        extra_fields: Optional[dict] = None
-    ) -> Path:
-        """Create metadata for folder-based import (SD card, etc)."""
-        # Copy log file
-        relative_log_path = None
-        if log_file_path:
-            relative_log_path = copy_log_to_metadata(log_file_path, self.metadata_dir)
-        
-        # Get folder contents
-        files = get_folder_contents(folder_path)
-        
-        # Set initial disposition
-        for f in files:
-            if f['is_media']:
-                f['disposition'] = 'imported_to_immich'
-            else:
-                f['disposition'] = 'skipped_non_media'
-        
-        # Apply immich-go results if available
-        if immich_results:
-            apply_immich_results_to_manifest(files, immich_results)
-        
-        # Calculate total size
-        total_size = sum(f.get('size', 0) for f in files)
-        
-        # Build extra fields
-        all_extra = {
-            'source_path': str(folder_path),
-            'immich_go_log': relative_log_path,
-            'immich_go_results': immich_results.get('summary') if immich_results else None,
-        }
-        if extra_fields:
-            all_extra.update(extra_fields)
-        
-        metadata = self.create_extraction_metadata(
-            source_name=folder_path.name,
-            import_type='sd-import' if source_type == 'sd-card' else 'folder-import',
-            source_type=source_type,
-            files=files,
-            total_size=total_size,
-            extra_fields=all_extra
-        )
-        
-        # Use folder name + timestamp for unique filename
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"{folder_path.name}_{timestamp}"
-        
-        return self.save_metadata(metadata, filename)
-    
-    def create_extraction_only_metadata(
-        self,
-        zip_path: Path,
-        extract_dir: Path,
-        related_parts: Optional[list[Path]] = None
-    ) -> Path:
-        """Create metadata for non-Google-Photos zip extraction."""
-        parts = related_parts if related_parts else [zip_path]
-        
-        # Build zip_files array with name and size
-        zip_files_info = []
-        total_size = 0
-        for part in parts:
-            size = part.stat().st_size if part.exists() else 0
-            total_size += size
-            zip_files_info.append({
-                'name': part.name,
-                'size': size
-            })
-        
-        # Gather all file info from all parts
-        all_files = []
-        for part in parts:
-            contents = get_zip_contents(part)
-            for f in contents:
-                f['zip_file'] = part.name
-                f['disposition'] = 'extracted'
-            all_files.extend(contents)
-        
-        # Determine base name for metadata file
-        if related_parts and len(related_parts) > 1:
-            match = re.match(r'(.+)-\d{3}\.zip$', zip_path.name)
-            base_name = match.group(1) if match else zip_path.stem
-        else:
-            base_name = zip_path.stem
-        
-        # Calculate relative extract path
-        try:
-            relative_extract_path = str(extract_dir.name)
-        except Exception:
-            relative_extract_path = str(extract_dir)
-        
-        metadata = self.create_extraction_metadata(
-            source_name=base_name,
-            import_type='extract',
-            source_type='google-takeout',
-            files=all_files,
-            total_size=total_size,
-            extra_fields={
-                'zip_files': zip_files_info,
-                'extract_destination': str(extract_dir),
-                'relative_extract_path': relative_extract_path,
-            }
-        )
-        
-        return self.save_metadata(metadata, base_name)
+    metadata = ImportMetadata(
+        import_type='extract',
+        source_type='google-takeout',
+        metadata_dir=metadata_dir,
+        zip_files=parts,
+        extract_dir=extract_dir,
+    )
+    return metadata.save()
 
 
 class ImmichGoRunner:
@@ -680,19 +455,18 @@ class ImmichGoRunner:
         """Create display version of command with masked API key."""
         return ' '.join(cmd).replace(self.api_key, '***API_KEY***')
     
-    def upload_google_photos(
+    def get_google_photos_command(
         self,
         zip_files: list[Path],
         export_prefix: str,
+        log_file: Path,
         extra_flags: Optional[list[str]] = None
-    ) -> tuple[int, dict, str, Path]:
+    ) -> list[str]:
         """
-        Upload Google Photos takeout zips to Immich.
+        Build command for Google Photos upload.
         
-        Returns: (exit_code, parsed_results, command_display, log_file_path)
+        Returns: command_list
         """
-        log_file = self.log_dir / f"{export_prefix}.immich-go.log"
-        
         cmd = ["immich-go", "upload", "from-google-photos"]
         cmd.extend(self._build_common_flags(log_file))
         
@@ -712,38 +486,25 @@ class ImmichGoRunner:
             cmd.extend(extra_flags)
         
         # Use glob pattern instead of listing all files
-        # e.g., /data/import/Takeout/takeout-20240827T200018Z-*.zip
         if zip_files:
             parent_dir = zip_files[0].parent
             glob_pattern = f"{parent_dir}/{export_prefix}-*.zip"
             cmd.append(glob_pattern)
         
-        cmd_display = self._mask_api_key(cmd)
-        total_size_gb = sum(z.stat().st_size for z in zip_files) / (1024**3)
-        
-        print(f"[INFO] Importing Google Photos: {export_prefix}")
-        print(f"[INFO]   Parts: {len(zip_files)}, Size: {total_size_gb:.2f} GB")
-        print(f"[INFO]   Log file: {log_file}")
-        print(f"[INFO]   Command: {cmd_display}")
-        
-        exit_code, results = self._run_with_retry(cmd, log_file, f"Google Photos import {export_prefix}")
-        
-        return exit_code, results, cmd_display, log_file
+        return cmd
     
-    def upload_folder(
+    def get_folder_command(
         self,
         folder_path: Path,
         tag: str,
+        log_file: Path,
         extra_flags: Optional[list[str]] = None
-    ) -> tuple[int, dict, str, Path]:
+    ) -> list[str]:
         """
-        Upload a folder to Immich.
+        Build command for folder upload.
         
-        Returns: (exit_code, parsed_results, command_display, log_file_path)
+        Returns: (command_list, command_display_string)
         """
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        log_file = self.log_dir / f"upload-{folder_path.name}-{timestamp}.log"
-        
         cmd = ["immich-go", "upload", "from-folder"]
         cmd.extend(self._build_common_flags(log_file))
         
@@ -760,16 +521,92 @@ class ImmichGoRunner:
         # Add folder path
         cmd.append(str(folder_path))
         
-        cmd_display = self._mask_api_key(cmd)
+        return cmd
+    
+    def upload_google_photos(
+        self,
+        metadata: ImportMetadata,
+        extra_flags: Optional[list[str]] = None
+    ) -> tuple[int, dict]:
+        """
+        Upload Google Photos takeout zips to Immich.
         
-        print(f"[INFO] Importing folder: {folder_path}")
-        print(f"[INFO]   Tag: {tag}")
+        Args:
+            metadata: Metadata dict from create_running_metadata containing:
+                - source_name (export_prefix)
+                - zip_files (list of {name, size})
+                - import_dir (directory containing zip files)
+                - immich_go_log (relative path to log file)
+            extra_flags: Additional flags for immich-go
+        
+        Returns: (exit_code, parsed_results)
+        """
+        export_prefix = metadata.source_name
+        import_dir = metadata.import_dir
+        
+        # Get zip file paths from metadata instance
+        zip_files = metadata.zip_files
+        
+        # Get log file path from metadata
+        log_file = self.log_dir / Path(metadata.get('immich_go_log', '')).name
+        if not log_file.name:
+            log_file = self.log_dir / f"{export_prefix}.immich-go.log"
+        
+        cmd = self.get_google_photos_command(zip_files, export_prefix, log_file, extra_flags)
+        cmd_display = self._mask_api_key(cmd)
+        metadata['command'] = cmd_display
+        metadata['log_file'] = str(log_file)
+        metadata.save()
+        total_size_gb = metadata.get('total_size', 0) / (1024**3)
+        
+        print(f"[INFO] Importing Google Photos: {export_prefix}")
+        print(f"[INFO]   Parts: {len(zip_files)}, Size: {total_size_gb:.2f} GB")
         print(f"[INFO]   Log file: {log_file}")
         print(f"[INFO]   Command: {cmd_display}")
         
+        exit_code, results = self._run_with_retry(cmd, log_file, f"Google Photos import {export_prefix}")
+        
+        return exit_code, results
+    
+    def upload_folder(
+        self,
+        metadata: dict,
+        extra_flags: Optional[list[str]] = None
+    ) -> tuple[int, dict]:
+        """
+        Upload a folder to Immich.
+        
+        Args:
+            metadata: Metadata dict from create_running_metadata containing:
+                - source_path (folder path)
+                - tag (import tag)
+                - immich_go_log (relative path to log file)
+            extra_flags: Additional flags for immich-go
+        
+        Returns: (exit_code, parsed_results)
+        """
+        folder_path = metadata.import_path
+        tag = metadata.get('tag', '')
+        
+        # Get log file path from metadata
+        log_file = self.log_dir / Path(metadata.get('immich_go_log', '')).name
+        if not log_file.name:
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            log_file = self.log_dir / f"upload-{folder_path.name}-{timestamp}.log"
+        
+        cmd = self.get_folder_command(folder_path, tag, log_file, extra_flags)
+        metadata['command'] = self._mask_api_key(cmd)
+        metadata['log_file'] = str(log_file)
+        metadata.save()
+
+        print(f"[INFO] Importing folder: {folder_path}")
+        print(f"[INFO]   Tag: {tag}")
+        print(f"[INFO]   Log file: {log_file}")
+        print(f"[INFO]   Command: {self._mask_api_key(cmd)}")
+        
         exit_code, results = self._run_with_retry(cmd, log_file, f"folder import {folder_path.name}")
         
-        return exit_code, results, cmd_display, log_file
+        return exit_code, results
     
     def has_errors(self, results: dict) -> bool:
         """Check if import results contain errors."""
@@ -1008,12 +845,12 @@ class ImportProcessor:
     def __init__(
         self,
         runner: Optional[ImmichGoRunner] = None,
-        metadata_builder: Optional[MetadataBuilder] = None,
+        metadata_dir: Optional[Path] = None,
         extract_base_dir: Optional[Path] = None,
         copy_failed_files: Optional[bool] = None
     ):
         self.runner = runner or ImmichGoRunner()
-        self.metadata_builder = metadata_builder or MetadataBuilder()
+        self.metadata_dir = metadata_dir or DEFAULT_METADATA_DIR
         self.extract_base_dir = extract_base_dir or DEFAULT_EXTRACT_DIR
         self.copy_failed_files = copy_failed_files if copy_failed_files is not None else DEFAULT_COPY_FAILED_FILES
         self.log_config()
@@ -1021,7 +858,7 @@ class ImportProcessor:
     def log_config(self):
         """Log current configuration."""
         print(f"[INFO] Immich server: {self.runner.server_url}")
-        print(f"[INFO] Metadata dir: {self.metadata_builder.metadata_dir}")
+        print(f"[INFO] Metadata dir: {self.metadata_dir}")
         print(f"[INFO] Extract dir: {self.extract_base_dir}")
         print(f"[INFO] Max retries: {self.runner.max_retries}, Retry delay: {self.runner.retry_delay}s")
         print(f"[INFO] Copy failed files: {self.copy_failed_files}")
@@ -1034,18 +871,55 @@ class ImportProcessor:
     ) -> tuple[bool, dict]:
         """
         Process Google Photos takeout zip files:
-        1. Import to Immich via immich-go
-        2. Extract non-Google-Photos content
-        3. Save metadata
-        4. Optionally delete zips (only if no errors)
+        1. Create 'running' metadata file
+        2. Import to Immich via immich-go
+        3. Extract non-Google-Photos content
+        4. Update metadata with results
+        5. Optionally delete zips (only if no errors)
         
         Returns: (success, immich_results)
         """
-        # Run immich-go import
-        exit_code, immich_results, cmd_display, log_file = self.runner.upload_google_photos(
-            zip_files=zip_files,
-            export_prefix=export_prefix
-        )
+        # Create 'running' metadata before starting import
+        # This generates source_name, log path, and calculates sizes from zip_files
+        metadata = None
+        try:
+            metadata = ImportMetadata(
+                import_type='immich-go',
+                source_type='google-photos',
+                metadata_dir=self.metadata_dir,
+                zip_files=zip_files,
+            )
+            metadata.save()
+        except Exception as e:
+            print(f"[WARNING] Failed to create running metadata: {e}")
+            # Fallback metadata for error handling
+            zip_files_info = [{'name': z.name, 'size': z.stat().st_size if z.exists() else 0} for z in zip_files]
+            import_dir = str(zip_files[0].parent) if zip_files else '.'
+            metadata = {
+                'source_name': export_prefix,
+                'zip_files': zip_files_info,
+                'import_dir': import_dir,
+                'immich_go_log': f'logs/{export_prefix}.immich-go.log'
+            }
+        
+        # Run immich-go import with metadata object
+        try:
+            exit_code, immich_results = self.runner.upload_google_photos(
+                metadata=metadata
+            )
+        except Exception as e:
+            # Update metadata with error status
+            error_msg = str(e)
+            print(f"[ERROR] immich-go failed with exception: {error_msg}")
+            try:
+                if isinstance(metadata, ImportMetadata):
+                    metadata.update_status(
+                        status='errored',
+                        error_details=error_msg,
+                    )
+            except Exception as meta_err:
+                print(f"[WARNING] Failed to update metadata with error: {meta_err}")
+            return False, {'summary': {}, 'files': {}}
         
         has_errors = self.runner.has_errors(immich_results)
         is_success = self.runner.is_success(exit_code, immich_results)
@@ -1074,15 +948,29 @@ class ImportProcessor:
             skip_google_photos=True
         )
         
-        # Save metadata
-        saved_file = self.metadata_builder.create_zip_import_metadata(
-            zip_files=zip_files,
-            export_prefix=export_prefix,
-            immich_results=immich_results,
-            log_file_path=str(log_file),
-            immich_go_command=cmd_display
-        )
-        print(f"[DEBUG] Saved metadata: {saved_file.name}")
+        # Determine final status
+        if is_success and not has_errors:
+            final_status = 'completed'
+        elif has_errors:
+            final_status = 'completed_with_errors'
+        else:
+            final_status = 'failed'
+        
+        # Update metadata with final status and results
+        try:
+            if isinstance(metadata, ImportMetadata):
+                metadata.update_status(
+                    status=final_status,
+                    files=file_manifest,
+                    immich_results=immich_results,
+                    extra_fields={
+                        'exit_code': exit_code,
+                        'extracted_count': extracted,
+                        'extract_failed_count': failed,
+                    }
+                )
+        except Exception as e:
+            print(f"[WARNING] Failed to update metadata: {e}")
         
         # Delete zips only if successful and no errors
         if delete_after_import and is_success and not has_errors:
@@ -1111,10 +999,11 @@ class ImportProcessor:
     ) -> tuple[bool, dict]:
         """
         Process a folder import:
-        1. Import to Immich via immich-go
-        2. Track which files were imported vs not imported
-        3. Optionally copy non-imported files to extract dir for review
-        4. Save metadata
+        1. Create 'running' metadata file
+        2. Import to Immich via immich-go
+        3. Track which files were imported vs not imported
+        4. Optionally copy non-imported files to extract dir for review
+        5. Update metadata with results
         
         Args:
             folder_path: Path to folder to import
@@ -1132,31 +1021,60 @@ class ImportProcessor:
         if copy_failed_files is None:
             copy_failed_files = self.copy_failed_files
         
-        # Count files in folder
-        media_count = 0
-        total_size = 0
-        for f in folder_path.rglob("*"):
-            if f.is_file():
-                media_count += 1
-                total_size += f.stat().st_size
-        
-        if media_count == 0:
-            print(f"[INFO] No files found in {folder_path}")
-            return True, {'summary': {}, 'files': {}}
-        
-        print(f"[INFO] Found {media_count} files ({format_size(total_size)}) in {folder_path}")
-        
         # Create import tag
         import_date = datetime.now().strftime('%Y-%m-%d')
         tag = f"{tag_prefix}/{import_date}"
         if device_label:
             tag = f"{tag_prefix}/{device_label}/{import_date}"
         
-        # Run immich-go import
-        exit_code, immich_results, cmd_display, log_file = self.runner.upload_folder(
-            folder_path=folder_path,
-            tag=tag
-        )
+        # Create 'running' metadata before starting import
+        # This generates source_name, log path, and calculates sizes from folder_path
+        metadata = None
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        try:
+            metadata = ImportMetadata(
+                import_type='folder-import' if source_type == 'folder' else 'sd-import',
+                source_type=source_type,
+                metadata_dir=self.metadata_dir,
+                folder_path=folder_path,
+                extra_fields={
+                    'tag': tag,
+                    'device_label': device_label,
+                }
+            )
+            metadata.save()
+        except Exception as e:
+            print(f"[WARNING] Failed to create running metadata: {e}")
+            metadata = {
+                'source_name': f"{folder_path.name}_{timestamp}",
+                'source_path': str(folder_path),
+                'tag': tag,
+                'immich_go_log': f"logs/upload-{folder_path.name}-{timestamp}.log",
+            }
+        
+        # Check if folder is empty (from metadata or direct check)
+        if metadata.get('file_count', 0) == 0:
+            print(f"[INFO] No files found in {folder_path}")
+            return True, {'summary': {}, 'files': {}}
+        
+        print(f"[INFO] Found {metadata.get('file_count', 0)} files ({format_size(metadata.get('total_size', 0))}) in {folder_path}")
+        
+        # Run immich-go import with metadata object
+        try:
+            exit_code, immich_results = self.runner.upload_folder(metadata=metadata)
+        except Exception as e:
+            # Update metadata with error status
+            error_msg = str(e)
+            print(f"[ERROR] immich-go failed with exception: {error_msg}")
+            try:
+                if isinstance(metadata, ImportMetadata):
+                    metadata.update_status(
+                        status='errored',
+                        error_details=error_msg,
+                    )
+            except Exception as meta_err:
+                print(f"[WARNING] Failed to update metadata with error: {meta_err}")
+            return False, {'summary': {}, 'files': {}}
         
         has_errors = self.runner.has_errors(immich_results)
         is_success = self.runner.is_success(exit_code, immich_results)
@@ -1176,7 +1094,6 @@ class ImportProcessor:
         # Apply immich-go results and track non-imported files
         extract_dir = None
         if copy_failed_files:
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
             extract_dir = self.extract_base_dir / f"{folder_path.name}-{timestamp}-failed"
         
         imported_count, not_imported_count, copy_failed_count = copy_remaining_from_folder(
@@ -1187,26 +1104,30 @@ class ImportProcessor:
             copy_failed=copy_failed_files
         )
         
-        # Save metadata
+        # Determine final status
+        if is_success and not has_errors:
+            final_status = 'completed'
+        elif has_errors:
+            final_status = 'completed_with_errors'
+        else:
+            final_status = 'failed'
+        
+        # Update metadata with final status and results
         try:
-            metadata_file = self.metadata_builder.create_folder_import_metadata(
-                folder_path=folder_path,
-                source_type=source_type,
-                immich_results=immich_results,
-                log_file_path=str(log_file),
-                extra_fields={
-                    'tag': tag,
-                    'device_label': device_label,
-                    'import_exit_code': exit_code,
-                    'immich_go_command': cmd_display,
-                    'has_errors': has_errors,
-                    'imported_count': imported_count,
-                    'not_imported_count': not_imported_count,
-                    'copy_failed_count': copy_failed_count if copy_failed_files else None,
-                }
-            )
-            print(f"[INFO] Created metadata: {metadata_file.name}")
+            if isinstance(metadata, ImportMetadata):
+                metadata.update_status(
+                    status=final_status,
+                    files=file_manifest,
+                    immich_results=immich_results,
+                    extra_fields={
+                        'exit_code': exit_code,
+                        'imported_count': imported_count,
+                        'not_imported_count': not_imported_count,
+                        'copy_failed_count': copy_failed_count if copy_failed_files else None,
+                    }
+                )
+                print(f"[INFO] Updated metadata: {metadata.get('source_name')}")
         except Exception as e:
-            print(f"[WARNING] Failed to create metadata: {e}")
+            print(f"[WARNING] Failed to update metadata: {e}")
         
         return is_success, immich_results

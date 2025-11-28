@@ -244,11 +244,12 @@
                     <thead>
                         <tr>
                             <th>Source</th>
+                            <th>Status</th>
                             <th>Type</th>
-                            <th>Source Type</th>
                             <th>Size</th>
                             <th>Files</th>
-                            <th>Date</th>
+                            <th>Started</th>
+                            <th>Duration</th>
                             <th>Summary</th>
                             <th>Actions</th>
                         </tr>
@@ -263,22 +264,48 @@
                                 {% endif %}
                             </td>
                             <td>
-                                {% if m.import_type == 'immich-go' %}
-                                <span class="badge badge-immich">immich-go</span>
+                                {% set status = m.status or 'unknown' %}
+                                {% if status == 'running' %}
+                                <span class="badge" style="background: var(--accent-blue); color: white;">⏳ Running</span>
+                                {% elif status == 'completed' %}
+                                <span class="badge" style="background: var(--accent-green); color: white;">✓ Completed</span>
+                                {% elif status == 'completed_with_errors' %}
+                                <span class="badge" style="background: var(--accent-yellow); color: black;">⚠ With Errors</span>
+                                {% elif status == 'errored' or status == 'failed' %}
+                                <span class="badge" style="background: var(--accent); color: white;">✗ Failed</span>
                                 {% else %}
-                                <span class="badge badge-extract">extract</span>
+                                <span class="badge" style="background: var(--text-secondary); color: white;">{{ status }}</span>
                                 {% endif %}
                             </td>
                             <td>
-                                {% if m.source_type == 'google-photos' %}
-                                <span class="badge badge-photos">photos</span>
+                                {% if m.import_type == 'immich-go' %}
+                                <span class="badge badge-immich">immich-go</span>
+                                {% elif m.import_type == 'folder-import' or m.import_type == 'sd-import' %}
+                                <span class="badge badge-photos">{{ m.import_type }}</span>
                                 {% else %}
-                                <span class="badge badge-takeout">takeout</span>
+                                <span class="badge badge-extract">{{ m.import_type or 'extract' }}</span>
                                 {% endif %}
                             </td>
                             <td>{{ m._zip_size_formatted or 'N/A' }}</td>
-                            <td>{{ m.total_files or m.files|length }}</td>
-                            <td>{{ m.extraction_date[:10] if m.extraction_date else 'N/A' }}</td>
+                            <td>{{ m.total_files or (m.files|length if m.files else '-') }}</td>
+                            <td>
+                                {% if m.start_time %}
+                                {{ m.start_time[:16].replace('T', ' ') }}
+                                {% elif m.extraction_date %}
+                                {{ m.extraction_date[:16].replace('T', ' ') }}
+                                {% else %}
+                                N/A
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if m.duration_seconds %}
+                                {{ (m.duration_seconds / 60)|round(1) }} min
+                                {% elif m.status == 'running' %}
+                                <span style="color: var(--accent-blue);">In progress...</span>
+                                {% else %}
+                                -
+                                {% endif %}
+                            </td>
                             <td>
                                 {% if m.summary %}
                                 <div class="summary-bar">

@@ -73,6 +73,7 @@ def get_log_files():
             'name': f.name,
             'path': str(f),
             'size': format_size(stat.st_size),
+            'created': datetime.fromtimestamp(stat.st_ctime).isoformat(),
             'modified': datetime.fromtimestamp(stat.st_mtime).isoformat()
         })
     return logs
@@ -234,7 +235,12 @@ def view_log(filename):
     if not filepath.exists():
         return "Not found", 404
     
-    return render_template('log.html', filename=filename)
+    # Get file timestamps
+    stat = filepath.stat()
+    created = datetime.fromtimestamp(stat.st_ctime).strftime('%Y-%m-%d %H:%M:%S')
+    modified = datetime.fromtimestamp(stat.st_mtime).strftime('%Y-%m-%d %H:%M:%S')
+    
+    return render_template('log.html', filename=filename, created=created, modified=modified)
 
 
 if __name__ == '__main__':

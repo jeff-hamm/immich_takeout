@@ -5,9 +5,7 @@ import datetime
 from pathlib import Path
 
 # CONFIGURABLE PATHS
-RCLONE_REMOTE = os.getenv("RCLONE_REMOTE", "gdrive")
-if not RCLONE_REMOTE.endswith(":"):
-    RCLONE_REMOTE = RCLONE_REMOTE + ":"
+RCLONE_REMOTE = os.getenv("RCLONE_REMOTE", "gdrive:")  # Sync entire Google Drive
 LOCAL_BACKUP_DIR = Path(os.getenv("GDRIVE_DIR", "/data/gdrive"))
 STATE_DIR = Path(os.getenv("STATE_DIR", "/data/state"))
 STATE_FILE = STATE_DIR / "last_sync.txt"

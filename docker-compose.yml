@@ -159,23 +159,23 @@ services:
       - "net.unraid.docker.icon=https://raw.githubusercontent.com/immich-app/immich/main/docs/static/img/favicon.png"
       - "net.unraid.docker.managed=composeman"
 
-  sd-import:
-    # Uses the immich-import image in 'folder' mode
-    image: immich-import:latest
-    container_name: sd-import
-    restart: "no"
-    depends_on:
-      - immich-import  # Ensures image is built
-    environment:
-      - IMMICH_API_URL=${IMMICH_SERVER}/api
-      - IMMICH_API_KEY_FILE=/run/secrets/immich_api_key
-      - METADATA_DIR=/data/metadata
-      - DELETE_AFTER_IMPORT=false
-    volumes:
-      - /mnt/user/imports/sd-cards:/data/import
-      - ${STATE_PATH}/.immich_api_key:/run/secrets/immich_api_key:ro
-      - ${IMPORTS_PATH}/metadata:/data/metadata
-    network_mode: bridge
-    command: ["python", "/app/immich_import.py", "folder", "--source-type", "sd-card", "--copy-failed"]
-    labels:
-      - "net.unraid.docker.managed=composeman"
+  # sd-import:
+  #   # Uses the immich-import image in 'folder' mode
+  #   image: immich-import:latest
+  #   container_name: sd-import
+  #   restart: "no"
+  #   depends_on:
+  #     - immich-import  # Ensures image is built
+  #   environment:
+  #     - IMMICH_API_URL=${IMMICH_SERVER}/api
+  #     - IMMICH_API_KEY_FILE=/run/secrets/immich_api_key
+  #     - METADATA_DIR=/data/metadata
+  #     - DELETE_AFTER_IMPORT=false
+  #   volumes:
+  #     - /mnt/user/imports/sd-cards:/data/import
+  #     - ${STATE_PATH}/.immich_api_key:/run/secrets/immich_api_key:ro
+  #     - ${IMPORTS_PATH}/metadata:/data/metadata
+  #   network_mode: bridge
+  #   command: ["python", "/app/immich_import.py", "folder", "--source-type", "sd-card", "--copy-failed"]
+  #   labels:
+  #     - "net.unraid.docker.managed=composeman"

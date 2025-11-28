@@ -199,7 +199,13 @@
                 <span>📋</span>
                 {{ filename }}
             </h1>
-            <a href="/" class="back-btn">← Back to Dashboard</a>
+            <div style="display: flex; gap: 20px; align-items: center;">
+                <div style="font-size: 0.85rem; color: var(--text-secondary);">
+                    <div>Created: {{ created }}</div>
+                    <div>Modified: {{ modified }}</div>
+                </div>
+                <a href="/" class="back-btn">← Back to Dashboard</a>
+            </div>
         </div>
         
         <div class="stats-bar" id="statsBar">
@@ -259,7 +265,7 @@
             try {
                 const response = await fetch('/api/logs/{{ filename }}');
                 const data = await response.json();
-                logEntries = data.entries;
+                logEntries = data.entries.reverse();  // Reverse to show newest first
                 
                 // Count by level
                 let info = 0, warn = 0, error = 0;
