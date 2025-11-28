@@ -1,10 +1,16 @@
 # Unraid SD Card Auto-Import Rule
 # Triggers import script when Generic SD/MMC card reader detects media
 # Device: Generic-_SD_MMC_MS_PRO_20120926571200000-0:0
+# Note: "change" action catches media insertion when reader stays connected
 
-ACTION=="add", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", \
+# Cleanup mounts first on any change (in case card was swapped)
+ACTION=="add|change", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", \
   ENV{ID_SERIAL}=="Generic-_SD_MMC_MS_PRO_20120926571200000-0:0", \
-  RUN+="/usr/bin/at -M now", ENV{SYSTEMD_WANTS}="", \
+  RUN+="/bin/bash -c 'for mp in /mnt/sd-import/*; do [ -d \"$mp\" ] && umount \"$mp\" 2>/dev/null && rmdir \"$mp\"; done'"
+
+# Then trigger import if media is present (has partitions)
+ACTION=="add|change", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", \
+  ENV{ID_SERIAL}=="Generic-_SD_MMC_MS_PRO_20120926571200000-0:0", \
   RUN+="/bin/sh -c 'echo \"/usr/local/bin/sd-card-import.sh %k\" | /usr/bin/at -M now'"
 
 ACTION=="remove", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", \

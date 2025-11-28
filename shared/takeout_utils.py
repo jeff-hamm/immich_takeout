@@ -41,6 +41,7 @@ DEFAULT_EXTRACT_DIR = Path(os.getenv("EXTRACT_DIR", "/data/extracted"))
 DEFAULT_MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
 DEFAULT_RETRY_DELAY = int(os.getenv("RETRY_DELAY", "30"))
 DEFAULT_COPY_FAILED_FILES = os.getenv("COPY_FAILED_FILES", "false").lower() == "true"
+DEFAULT_PAUSE_IMMICH_JOBS = os.getenv("PAUSE_IMMICH_JOBS", "false").lower() == "true"
 
 
 def is_media_file(filename: str) -> bool:

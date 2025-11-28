@@ -54,6 +54,7 @@ services:
       - METADATA_DIR=/data/metadata
       - EXTRACT_DIR=/data/extracted
       - DELETE_AFTER_IMPORT=true
+      - PAUSE_IMMICH_JOBS=true
     volumes:
       - ${GDRIVE_PATH}/Takeout:/data/import/Takeout
       - ${STATE_PATH}/.immich_api_key:/run/secrets/immich_api_key:ro

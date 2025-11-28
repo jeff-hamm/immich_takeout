@@ -67,13 +67,11 @@ IMPORT_DATE=$(date +%Y%m%d)
 # The container will handle the immich-go upload and metadata creation
 docker run --rm \
     --name "sd-import-$IMPORT_DATE" \
-    -e IMMICH_API_URL="$IMMICH_SERVER/api" \
+    -e IMMICH_SERVER="$IMMICH_SERVER" \
     -e IMMICH_API_KEY="$IMMICH_API_KEY" \
     -e DELETE_AFTER_IMPORT=false \
     -v "$UPLOAD_PATH:/data/import:ro" \
     -v "${UPLOAD_PATH}/metadata:/data/metadata" \
     --network bridge \
     immich-import:latest \
-    folder --source-type sd-card \
-        --label "$IMPORT_DATE" \
-        --copy-failed
+    folder --source-type sd-card --label "$IMPORT_DATE"

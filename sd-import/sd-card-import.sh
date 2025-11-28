@@ -7,11 +7,37 @@ MOUNT_BASE="/mnt/sd-import"
 IMPORT_BASE="${IMPORTS_PATH:-/mnt/user/jumpdrive/imports}"
 LOG_FILE="/var/log/sd-card-import.log"
 IMMICH_SERVER="${IMMICH_SERVER:-http://192.168.1.216:2283}"
+LOCK_FILE="/tmp/sd-card-import.lock"
+LOCK_TIMEOUT=300  # 5 minutes max - if lock older than this, ignore it
 
 # Function to log messages
 log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE"
 }
+
+# Soft lock - prefer skipping duplicate runs but never block forever
+acquire_lock() {
+    if [ -f "$LOCK_FILE" ]; then
+        LOCK_AGE=$(($(date +%s) - $(stat -c %Y "$LOCK_FILE" 2>/dev/null || echo 0)))
+        if [ $LOCK_AGE -lt $LOCK_TIMEOUT ]; then
+            log "Another import is running (lock age: ${LOCK_AGE}s), exiting"
+            exit 0
+        else
+            log "Stale lock found (age: ${LOCK_AGE}s), removing and continuing"
+            rm -f "$LOCK_FILE"
+        fi
+    fi
+    echo $$ > "$LOCK_FILE"
+}
+
+release_lock() {
+    rm -f "$LOCK_FILE"
+}
+
+# Clean up lock on exit (but don't trap errors - let script continue if lock fails)
+trap release_lock EXIT
+
+acquire_lock
 
 log "=========================================="
 log "SD card device detected: /dev/$DEVICE"

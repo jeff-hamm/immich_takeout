@@ -24,6 +24,7 @@ try:
         DEFAULT_LOG_DIR,
         DEFAULT_MAX_RETRIES,
         DEFAULT_RETRY_DELAY,
+        DEFAULT_PAUSE_IMMICH_JOBS,
     )
     from .import_metadata import ImportMetadata
 except ImportError:
@@ -38,6 +39,7 @@ except ImportError:
         DEFAULT_LOG_DIR,
         DEFAULT_MAX_RETRIES,
         DEFAULT_RETRY_DELAY,
+        DEFAULT_PAUSE_IMMICH_JOBS,
     )
     from import_metadata import ImportMetadata
 
@@ -98,6 +100,7 @@ def create_metadata_callback(metadata: 'ImportMetadata') -> Callable[[dict], Non
 
 def default_result_callback(result: dict) -> None:
     """Default callback that logs each result."""
+
     event_type = result.get('event_type', 'unknown')
     
     if event_type == 'file_result':
@@ -301,9 +304,11 @@ class ImmichGoRunner:
     
     def _build_common_flags(self, log_file: Path) -> list[str]:
         """Build common flags for all upload types."""
+        pause_jobs = "true" if DEFAULT_PAUSE_IMMICH_JOBS else "false"
         return [
             "-s", self.server_url,
-            "-k", self.api_key,
+            "--admin-api-key", self.api_key,
+            f"--pause-immich-jobs={pause_jobs}",
             "--log-level=INFO",
             "--log-type=JSON",
             f"--log-file={log_file}",

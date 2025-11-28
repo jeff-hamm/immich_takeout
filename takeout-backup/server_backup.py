@@ -44,15 +44,25 @@ def ensure_dirs():
     METADATA_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def is_valid_zip(zip_path):
-    """Check if a zip file is valid and not corrupted."""
+def is_valid_zip(zip_path, full_check=False):
+    """Check if a zip file is valid.
+    
+    Args:
+        zip_path: Path to the zip file
+        full_check: If True, verify integrity of all files (slow). 
+                   If False, just check if the zip can be opened (fast).
+    """
     try:
         with zipfile.ZipFile(zip_path, 'r') as zf:
-            # Test the zip file integrity
-            bad_file = zf.testzip()
-            if bad_file:
-                print(f"[WARNING] Corrupted file in zip: {bad_file}")
-                return False
+            # Always do a quick check that we can read the central directory
+            _ = zf.namelist()
+            
+            if full_check:
+                # Full integrity check - reads entire file
+                bad_file = zf.testzip()
+                if bad_file:
+                    print(f"[WARNING] Corrupted file in zip: {bad_file}")
+                    return False
             return True
     except zipfile.BadZipFile as e:
         print(f"[WARNING] Invalid/corrupted zip file {zip_path.name}: {e}")
@@ -211,8 +221,8 @@ def process_extracted_zips():
         if not zip_path.is_file() or zip_path in processed_files:
             continue
         
-        # Check if zip is valid/complete first
-        if not is_valid_zip(zip_path):
+        # Quick check if zip can be opened (reads central directory only)
+        if not is_valid_zip(zip_path, full_check=False):
             print(f"[WARNING] Skipping corrupted/incomplete zip: {zip_path.name}")
             skipped_corrupt += 1
             processed_files.add(zip_path)
@@ -221,11 +231,11 @@ def process_extracted_zips():
         # Get all parts of this archive (if multi-part)
         related_parts = get_multipart_group(zip_path)
         
-        # Validate all parts if multi-part
+        # Quick validate all parts if multi-part
         if len(related_parts) > 1:
             all_valid = True
             for part in related_parts:
-                if not is_valid_zip(part):
+                if not is_valid_zip(part, full_check=False):
                     print(f"[WARNING] Multi-part archive has corrupted part: {part.name}")
                     all_valid = False
                     break
@@ -250,7 +260,7 @@ def process_extracted_zips():
             processed_files.update(related_parts)
             continue
         
-        # Extract non-photos archives
+        # Extract non-photos archives (extraction will fail if corrupt)
         if extract_zip(zip_path, related_parts):
             extracted_groups += 1
         processed_files.update(related_parts)

@@ -3,8 +3,11 @@
 Immich Takeout Importer
 Monitors for new Google Takeout zip files and imports them to Immich using immich-go
 """
+import json
 import os
 import sys
+import urllib.request
+import urllib.error
 import zipfile
 from pathlib import Path
 
@@ -19,6 +22,8 @@ from takeout_utils import (
     ImportProcessor,
     is_google_photos_path,
     get_zip_contents,
+    get_immich_api_key,
+    DEFAULT_IMMICH_SERVER,
 )
 
 # Script-specific configuration
@@ -26,6 +31,78 @@ IMPORT_DIR = Path(os.getenv("IMPORT_DIR", "/data/import"))
 TAKEOUT_DIR = Path(os.getenv("TAKEOUT_DIR", str(IMPORT_DIR) + "/Takeout"))  # Legacy name
 TAKEOUT_FILE_FILTER = os.getenv("TAKEOUT_FILE_FILTER", "takeout-*.zip")
 DELETE_AFTER_IMPORT = os.getenv("DELETE_AFTER_IMPORT", "true").lower() == "true"
+RESUME_JOBS_ON_EXIT = os.getenv("RESUME_JOBS_ON_EXIT", "true").lower() == "true"
+
+
+def resume_immich_jobs(server_url: str = None, api_key: str = None) -> dict:
+    """Resume all paused jobs in Immich."""
+    server_url = server_url or DEFAULT_IMMICH_SERVER
+    server_url = server_url.rstrip('/')
+    if server_url.endswith('/api'):
+        server_url = server_url[:-4]
+    
+    if not api_key:
+        try:
+            api_key = get_immich_api_key()
+        except Exception as e:
+            print(f"[WARNING] Could not get API key for job resume: {e}")
+            return {'errors': [str(e)]}
+    
+    results = {
+        'resumed': [],
+        'already_running': [],
+        'errors': []
+    }
+    
+    # Get jobs status
+    try:
+        url = f"{server_url}/api/jobs"
+        req = urllib.request.Request(
+            url,
+            headers={'x-api-key': api_key, 'Accept': 'application/json'},
+            method='GET'
+        )
+        with urllib.request.urlopen(req, timeout=30) as response:
+            jobs = json.loads(response.read().decode('utf-8'))
+    except Exception as e:
+        print(f"[ERROR] Failed to get jobs status: {e}")
+        results['errors'].append(f"Failed to get jobs: {e}")
+        return results
+    
+    # Resume paused jobs
+    for job_name, job_info in jobs.items():
+        if not isinstance(job_info, dict):
+            continue
+        
+        queue_status = job_info.get('queueStatus', {})
+        is_paused = queue_status.get('isPaused', False)
+        is_active = queue_status.get('isActive', False)
+        
+        if is_paused:
+            try:
+                url = f"{server_url}/api/jobs/{job_name}"
+                data = json.dumps({"command": "resume", "force": False}).encode('utf-8')
+                req = urllib.request.Request(
+                    url,
+                    data=data,
+                    headers={
+                        'x-api-key': api_key,
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    method='PUT'
+                )
+                with urllib.request.urlopen(req, timeout=30) as response:
+                    json.loads(response.read().decode('utf-8'))
+                print(f"[INFO] Resumed job: {job_name}")
+                results['resumed'].append(job_name)
+            except Exception as e:
+                print(f"[ERROR] Failed to resume {job_name}: {e}")
+                results['errors'].append(f"{job_name}: {e}")
+        elif is_active:
+            results['already_running'].append(job_name)
+    
+    return results
 
 
 def ensure_dirs():
@@ -408,6 +485,15 @@ def main():
             import traceback
             traceback.print_exc()
             sys.exit(1)
+        finally:
+            # Resume Immich jobs on exit
+            if RESUME_JOBS_ON_EXIT:
+                print("[INFO] Resuming Immich jobs...")
+                results = resume_immich_jobs()
+                if results.get('resumed'):
+                    print(f"[INFO] Resumed {len(results['resumed'])} job(s): {', '.join(results['resumed'])}")
+                if results.get('errors'):
+                    print(f"[WARNING] Some jobs failed to resume: {len(results['errors'])} error(s)")
 
 
 if __name__ == "__main__":
