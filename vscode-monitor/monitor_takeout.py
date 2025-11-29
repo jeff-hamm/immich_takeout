@@ -231,9 +231,6 @@ def run_copilot(prompt: str, timestamp: str) -> tuple[int, str]:
         output = result.stdout + result.stderr
         print(output)
         
-        # Save analysis
-        save_analysis(prompt, output, timestamp)
-        
         return result.returncode, output
         
     except subprocess.TimeoutExpired:
