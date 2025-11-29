@@ -156,8 +156,9 @@ def main():
     import argparse
     
     parser = argparse.ArgumentParser(description='Manage Immich jobs')
-    parser.add_argument('action', choices=['resume', 'pause', 'status'],
-                        help='Action to perform')
+    parser.add_argument('action', nargs='?', default='status',
+                        choices=['resume', 'pause', 'status'],
+                        help='Action to perform (default: status)')
     parser.add_argument('--server', '-s', 
                         default=os.getenv('IMMICH_SERVER', 'http://192.168.1.216:2283'),
                         help='Immich server URL')

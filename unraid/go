@@ -67,3 +67,9 @@ fi
 if [ -f /mnt/user/appdata/takeout-script/state/.copilot-token ]; then
     ln -sf /mnt/user/appdata/takeout-script/state/.copilot-token /root/.copilot-token
 fi
+
+# Increase /var/log tmpfs to 1GB (default is 128MB which fills up quickly)
+mount -o remount,size=1G /var/log
+
+# Clean old rotated logs daily at 3am to prevent /var/log from filling up
+echo "0 3 * * * find /var/log -name '*.1' -o -name '*.2' -o -name '*.gz' | xargs rm -f 2>/dev/null" | crontab -

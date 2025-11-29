@@ -546,6 +546,14 @@ if [ -f "$SCRIPT_DIR/unraid/go" ]; then
     # Apply profile fix immediately
     sed -i '/^cd \$HOME$/d' /etc/profile
     print_success "Applied profile fix (removed cd \$HOME)"
+    
+    # Apply /var/log resize immediately (don't wait for reboot)
+    mount -o remount,size=1G /var/log 2>/dev/null || true
+    print_success "Increased /var/log to 1GB"
+    
+    # Set up log cleanup cron immediately
+    echo "0 3 * * * find /var/log -name '*.1' -o -name '*.2' -o -name '*.gz' | xargs rm -f 2>/dev/null" | crontab -
+    print_success "Added daily log cleanup cron job (3am)"
 else
     print_warning "unraid/go not found, skipping"
 fi
