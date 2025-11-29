@@ -3,6 +3,8 @@
 Immich Takeout Importer
 Monitors for new Google Takeout zip files and imports them to Immich using immich-go
 """
+import atexit
+import fcntl
 import json
 import os
 import sys
@@ -10,6 +12,60 @@ import urllib.request
 import urllib.error
 import zipfile
 from pathlib import Path
+
+# Lock file to prevent concurrent runs on the same path
+LOCK_DIR = Path(os.getenv("LOCK_DIR", "/tmp"))
+_lock_fd = None
+_lock_path = None
+
+
+def get_lock_path(import_path: Path) -> Path:
+    """Generate a lock file path based on the import path."""
+    # Create a safe filename from the path
+    safe_name = str(import_path.resolve()).replace("/", "_").replace("\\", "_")
+    return LOCK_DIR / f"immich-import-{safe_name}.lock"
+
+
+def acquire_lock(import_path: Path) -> bool:
+    """Acquire exclusive lock to prevent concurrent runs on the same path. Returns True if lock acquired."""
+    global _lock_fd, _lock_path
+    _lock_path = get_lock_path(import_path)
+    try:
+        _lock_fd = open(_lock_path, 'w')
+        fcntl.flock(_lock_fd.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        _lock_fd.write(f"{os.getpid()}\n")
+        _lock_fd.flush()
+        print(f"[INFO] Acquired lock for {import_path} (PID {os.getpid()})")
+        return True
+    except (IOError, OSError) as e:
+        # Could not acquire lock - another instance is running
+        if _lock_fd:
+            _lock_fd.close()
+            _lock_fd = None
+        # Try to read the PID of the running process
+        try:
+            with open(_lock_path, 'r') as f:
+                other_pid = f.read().strip()
+            print(f"[INFO] Another import is already running on {import_path} (PID {other_pid}), exiting")
+        except:
+            print(f"[INFO] Another import is already running on {import_path}, exiting")
+        return False
+
+
+def release_lock():
+    """Release the lock file."""
+    global _lock_fd, _lock_path
+    if _lock_fd:
+        try:
+            fcntl.flock(_lock_fd.fileno(), fcntl.LOCK_UN)
+            _lock_fd.close()
+            if _lock_path:
+                _lock_path.unlink(missing_ok=True)
+            print(f"[INFO] Released lock")
+        except:
+            pass
+        _lock_fd = None
+        _lock_path = None
 
 # Add shared module to path (works both locally and in Docker)
 _script_dir = Path(__file__).parent
@@ -28,8 +84,8 @@ from takeout_utils import (
 
 # Script-specific configuration
 IMPORT_DIR = Path(os.getenv("IMPORT_DIR", "/data/import"))
-TAKEOUT_DIR = Path(os.getenv("TAKEOUT_DIR", str(IMPORT_DIR) + "/Takeout"))  # Legacy name
-TAKEOUT_FILE_FILTER = os.getenv("TAKEOUT_FILE_FILTER", "takeout-*.zip")
+DEFAULT_TAKEOUT_DIR = Path(os.getenv("TAKEOUT_DIR", str(IMPORT_DIR) + "/Takeout"))
+DEFAULT_TAKEOUT_FILE_FILTER = os.getenv("TAKEOUT_FILE_FILTER", "takeout-*.zip")
 DELETE_AFTER_IMPORT = os.getenv("DELETE_AFTER_IMPORT", "true").lower() == "true"
 RESUME_JOBS_ON_EXIT = os.getenv("RESUME_JOBS_ON_EXIT", "true").lower() == "true"
 
@@ -168,22 +224,22 @@ def filter_valid_zips(zip_files: list[Path]) -> tuple[list[Path], list[Path]]:
     return valid, invalid
 
 
-def find_takeout_exports():
+def find_takeout_exports(takeout_dir: Path, file_filter: str):
     """Group takeout zip files by export (by date prefix) and check if they contain Google Photos."""
-    if not TAKEOUT_DIR.exists():
-        print("[INFO] No takeout directory found.")
+    if not takeout_dir.exists():
+        print(f"[INFO] Takeout directory not found: {takeout_dir}")
         return []
 
-    print(f"[INFO] Scanning {TAKEOUT_DIR} for takeout exports...")
+    print(f"[INFO] Scanning {takeout_dir} for takeout exports...")
     
     # Group zip files by their takeout export prefix (e.g., takeout-20240427T195310Z)
     exports = {}
     
     # Find both .zip and .partial files
-    all_zips = list(TAKEOUT_DIR.rglob(TAKEOUT_FILE_FILTER))
+    all_zips = list(takeout_dir.rglob(file_filter))
     # Also find .partial files based on the filter pattern
-    partial_filter = TAKEOUT_FILE_FILTER + ".partial"
-    all_partials = list(TAKEOUT_DIR.rglob(partial_filter))
+    partial_filter = file_filter + ".partial"
+    all_partials = list(takeout_dir.rglob(partial_filter))
     
     print(f"[INFO] Found {len(all_zips)} zip file(s), {len(all_partials)} partial file(s)")
     
@@ -289,9 +345,9 @@ def import_export_to_immich(export_prefix, zip_files):
     return success
 
 
-def process_google_takeout():
+def process_google_takeout(takeout_dir: Path, file_filter: str):
     """Check for and process any new takeout exports."""
-    exports = find_takeout_exports()
+    exports = find_takeout_exports(takeout_dir, file_filter)
 
     if not exports:
         print(f"[INFO] No new takeout exports with Google Photos content found")
@@ -343,7 +399,9 @@ def main():
                        choices=["takeout", "folder"],
                        help="Import mode: 'takeout' for Google Takeout zips, 'folder' for direct folder import")
     parser.add_argument("path", nargs="?", type=Path,
-                       help="Path to folder to import defaults to IMPORT_PATH")
+                       help="Path to import from (takeout dir or folder, defaults to env vars)")
+    parser.add_argument("--filter", "-f", default=None,
+                       help="File filter pattern for takeout mode (default: takeout-*.zip)")
     parser.add_argument("--source-type", "-t", default="folder",
                        help="Type of source device (e.g., folder, sd-card, camera, phone)")
     parser.add_argument("--label", "-l", help="Device label for tagging")
@@ -354,11 +412,24 @@ def main():
     
     args = parser.parse_args()
     
+    # Determine the import path for locking
+    if args.mode == "folder":
+        import_path = args.path or IMPORT_DIR
+    else:
+        import_path = args.path or DEFAULT_TAKEOUT_DIR
+    
+    # Acquire path-specific lock to prevent concurrent runs on the same path
+    if not acquire_lock(import_path):
+        sys.exit(0)  # Exit gracefully, another instance is running on this path
+    
+    # Register cleanup on exit
+    atexit.register(release_lock)
+    
     print(f"[INFO] Starting Immich import...")
     ImportProcessor.get_instance()  # Initialize and log config
     
     if args.mode == "folder":
-        folder_path = args.path or IMPORT_DIR
+        folder_path = import_path
         
         if not folder_path.exists():
             print(f"[ERROR] Path does not exist: {folder_path}")
@@ -379,11 +450,15 @@ def main():
         sys.exit(0 if success else 1)
     else:
         # Default: takeout mode
-        print(f"[INFO] Watching: {TAKEOUT_DIR}")
+        takeout_dir = import_path
+        file_filter = args.filter or DEFAULT_TAKEOUT_FILE_FILTER
+        
+        print(f"[INFO] Takeout dir: {takeout_dir}")
+        print(f"[INFO] File filter: {file_filter}")
         print(f"[INFO] Delete after import: {DELETE_AFTER_IMPORT}")
         
         try:
-            processed = process_google_takeout()
+            processed = process_google_takeout(takeout_dir, file_filter)
             if processed > 0:
                 print(f"[INFO] Processed {processed} file(s)")
             else:

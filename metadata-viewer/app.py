@@ -6,11 +6,20 @@ import json
 import os
 from datetime import datetime
 from pathlib import Path
-from flask import Flask, render_template, jsonify, send_file, request
+from flask import Flask, render_template, jsonify, send_file, request, make_response
 
 app = Flask(__name__)
 
 METADATA_DIR = Path(os.getenv("METADATA_DIR", "/data/metadata"))
+
+
+@app.after_request
+def add_no_cache_headers(response):
+    """Add no-cache headers to all responses to prevent stale data."""
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 
 def format_size(size_bytes):
