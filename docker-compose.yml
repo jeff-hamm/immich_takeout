@@ -171,6 +171,9 @@ services:
     restart: "no"
     # Run as root for full docker access
     user: "0:0"
+    # Enable host PID namespace for nsenter to work (needed for Unraid notify)
+    pid: host
+    privileged: true
     environment:
       - LOG_DIR=/app/logs
       - GH_TOKEN=${GH_TOKEN:-}
@@ -184,17 +187,10 @@ services:
     volumes:
       # Docker socket for container management (restart, logs, build)
       - /var/run/docker.sock:/var/run/docker.sock
-      # Full project directory (read-write for script editing)
       - .:/app:rw
       - ${CHADBURN_DOCKERFILE}:/app/chadburn/docker-compose.yml:rw
-      # Prompt file for AI guidance
       - ./vscode-monitor/copilot_prompt.md:/app/copilot_prompt.md:ro
-      # Logs directory for persistent logging
-      # Mount GitHub token file for Copilot CLI authentication
-      # Token is stored in state/.copilot-token for Unraid persistence
       - ./state/.copilot-token:/root/.copilot-token:ro
-      # Mount Unraid notify script for sending alerts
-      - /usr/local/emhttp/plugins/dynamix/scripts/notify:/unraid/notify:ro
     working_dir: /app/takeout-script
     network_mode: bridge
     labels:

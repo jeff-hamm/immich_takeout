@@ -133,12 +133,13 @@ def ensure_copilot_version() -> bool:
 
 
 def send_notification(event: str, subject: str, description: str, importance: str = "normal", message: str = ""):
-    """Send notification to Unraid notification system."""
-    if not os.path.exists(UNRAID_NOTIFY):
-        print(f"[WARN] Unraid notify script not found at {UNRAID_NOTIFY}")
-        return False
+    """Send notification to Unraid notification system.
     
-    cmd = [UNRAID_NOTIFY, "-e", event, "-s", subject, "-d", description, "-i", importance]
+    Uses the /usr/local/bin/notify wrapper script which handles nsenter internally.
+    This wrapper exists because direct nsenter calls are blocked by Copilot CLI.
+    """
+    # Use the wrapper script installed in the container
+    cmd = ["/usr/local/bin/notify", "-e", event, "-s", subject, "-d", description, "-i", importance]
     if message:
         cmd.extend(["-m", message])
     
@@ -148,41 +149,14 @@ def send_notification(event: str, subject: str, description: str, importance: st
             print(f"[NOTIFY] Sent: {importance.upper()} - {subject}")
             return True
         else:
-            print(f"[WARN] Notify failed: {result.stderr}")
+            print(f"[WARN] Notify failed (exit {result.returncode}): {result.stderr.strip()}")
             return False
+    except FileNotFoundError:
+        print("[WARN] Notify wrapper script not found at /usr/local/bin/notify")
+        return False
     except Exception as e:
         print(f"[WARN] Notify error: {e}")
         return False
-
-
-def get_context() -> str:
-    """Gather all context for the AI agent."""
-    context = []
-    
-    # Container logs
-    try:
-        result = subprocess.run(
-            ["docker", "logs", "--tail", "300", CONTAINER],
-            capture_output=True, text=True, timeout=30
-        )
-        logs = result.stdout + result.stderr
-    except Exception as e:
-        logs = f"Could not retrieve container logs: {e}"
-    context.append(f"=== CONTAINER LOGS ({CONTAINER}) ===\n{logs}")
-        
-    # Container status
-    try:
-        result = subprocess.run(
-            ["docker", "ps", "-a", "--filter", f"name={CONTAINER}", "--format", "{{.Status}}"],
-            capture_output=True, text=True, timeout=10
-        )
-        status = result.stdout.strip() or "Unknown"
-    except Exception as e:
-        status = f"Could not get status: {e}"
-    context.append(f"=== CONTAINER STATUS ===\n{status}")
-    
-    return "\n\n".join(context)
-
 
 def load_prompt() -> str:
     """Load the AI instructions from prompt file."""
@@ -327,15 +301,11 @@ def main():
         print("[ERROR] Cannot proceed without GitHub authentication")
         return 1
     
-    # Gather context
-    print("\nGathering context...")
-    context = get_context()
-    
     # Load instructions
     instructions = load_prompt()
     
     # Build full prompt
-    full_prompt = f"{instructions}\n\n{context}"
+    full_prompt = f"{instructions}"
     
     # Log prompt size
     print(f"Prompt size: {len(full_prompt)} chars")

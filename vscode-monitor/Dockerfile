@@ -4,13 +4,14 @@
 
 FROM node:22-slim
 
-# Install dependencies
+# Install util-linux for nsenter (needed for host namespace notifications)
 RUN apt-get update && apt-get install -y \
     curl \
     jq \
     git \
     python3 \
     docker.io \
+    util-linux \
     && rm -rf /var/lib/apt/lists/*
 
 # Install GitHub Copilot CLI globally
@@ -32,6 +33,8 @@ RUN mkdir -p /app/logs /app/analysis
 # Copy monitoring scripts
 COPY monitor_takeout.py /app/
 COPY copilot_prompt.md /app/
+COPY notify.sh /usr/local/bin/notify
+RUN chmod +x /usr/local/bin/notify
 
 # Default to running the monitor script
-CMD ["python3", "/app/monitor_takeout.py"]
+CMD ["python3", "/app/vscode-monitor/monitor_takeout.py"]
