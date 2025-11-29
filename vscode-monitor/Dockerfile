@@ -5,7 +5,9 @@
 FROM node:22-slim
 
 # Install util-linux for nsenter (needed for host namespace notifications)
-RUN apt-get update && apt-get install -y \
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update && apt-get install -y \
     curl \
     jq \
     git \
