@@ -184,14 +184,20 @@ services:
       - COPILOT_VERSION=${COPILOT_VERSION:-}
       # Unraid notify script path inside container
       - UNRAID_NOTIFY=/unraid/notify
+      # Application name for paths
+      - APP_NAME=${APP_NAME:-takeout-script}
+      # FileBrowser config for analysis file links
+      - FILEBROWSER_BASE_URL=${FILEBROWSER_BASE_URL:-}
+      - FILEBROWSER_ANALYSIS_PATH=${FILEBROWSER_ANALYSIS_PATH:-}
     volumes:
       # Docker socket for container management (restart, logs, build)
       - /var/run/docker.sock:/var/run/docker.sock
       - .:/app:rw
+      - ./state:/state
       - ${CHADBURN_DOCKERFILE}:/app/chadburn/docker-compose.yml:rw
       - ./vscode-monitor/copilot_prompt.md:/app/copilot_prompt.md:ro
       - ./state/.copilot-token:/root/.copilot-token:ro
-    working_dir: /app/takeout-script
+    working_dir: /app
     network_mode: bridge
     labels:
       - "chadburn.enabled=true"

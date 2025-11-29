@@ -181,6 +181,9 @@ class ImmichGoRunner:
         self.max_retries = max_retries if max_retries is not None else DEFAULT_MAX_RETRIES
         self.retry_delay = retry_delay if retry_delay is not None else DEFAULT_RETRY_DELAY
         
+        # Track failed jobs for summary at end
+        self.failed_jobs: list[dict] = []
+        
         # Ensure log directory exists
         self.log_dir.mkdir(parents=True, exist_ok=True)
     
@@ -648,3 +651,51 @@ class ImmichGoRunner:
         return (f"uploaded={s.get('uploaded', 0)}, "
                 f"duplicates={s.get('server_duplicate', 0) + s.get('local_duplicate', 0)}, "
                 f"errors={s.get('errors', 0)}")
+    
+    def add_failed_job(self, source_name: str, reason: str, files: list = None):
+        """Add a failed job to the queue for end-of-run summary."""
+        self.failed_jobs.append({
+            'source_name': source_name,
+            'reason': reason,
+            'files': files or [],
+            'timestamp': datetime.now().isoformat()
+        })
+    
+    def has_failed_jobs(self) -> bool:
+        """Check if there are any failed jobs in the queue."""
+        return len(self.failed_jobs) > 0
+    
+    def get_failed_jobs(self) -> list[dict]:
+        """Get the list of failed jobs."""
+        return self.failed_jobs
+    
+    def print_failed_jobs_summary(self):
+        """Print a summary of all failed jobs."""
+        if not self.failed_jobs:
+            return
+        
+        print("\n" + "=" * 60)
+        print(f"[FAILED JOBS SUMMARY] {len(self.failed_jobs)} job(s) failed:")
+        print("=" * 60)
+        
+        for i, job in enumerate(self.failed_jobs, 1):
+            print(f"\n{i}. {job['source_name']}")
+            print(f"   Reason: {job['reason']}")
+            if job.get('files'):
+                print(f"   Files: {len(job['files'])} file(s) NOT deleted")
+                # Show first few files
+                for f in job['files'][:3]:
+                    if isinstance(f, dict):
+                        print(f"     - {f.get('name', f)}")
+                    else:
+                        print(f"     - {f}")
+                if len(job['files']) > 3:
+                    print(f"     ... and {len(job['files']) - 3} more")
+        
+        print("\n" + "=" * 60)
+        print("[INFO] Files from failed jobs were NOT deleted. Please review and retry.")
+        print("=" * 60 + "\n")
+    
+    def clear_failed_jobs(self):
+        """Clear the failed jobs queue."""
+        self.failed_jobs = []

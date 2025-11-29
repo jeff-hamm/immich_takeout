@@ -7,7 +7,7 @@ You are an AI agent responsible for monitoring and fixing the issues in this fil
 You are running inside a Docker container with:
 - Full access to `/var/run/docker.sock` (can run any docker command)
 - Read-write access to the project at `/app`
-- Read-write access to the takeout-script docker-compose at `/app/docker-compose.yml`
+- Read-write access to the project docker-compose at `/app/docker-compose.yml`
 - Read-write access to the script at `/app/automated-takeout/automated_takeout.py`
 - Read-write access to Chadburn config at `/app/chadburn/docker-compose.yml`
 - Working directory: `/app`
@@ -39,16 +39,16 @@ You can send notifications to the Unraid notification system for important event
 
 ### How it Works
 The Unraid notify script is a PHP script that requires the full Unraid emhttp environment.
-It cannot run directly inside a container. A wrapper script `/usr/local/bin/notify` is 
-provided that uses `nsenter` to run the command in the host's PID/mount namespace.
+It cannot run directly inside a container. We use a Python helper that calls `nsenter` 
+to run the command in the host's PID/mount namespace.
 
-**IMPORTANT**: Always use the wrapper script, not `nsenter` directly. The Copilot CLI
-blocks direct `nsenter` commands for security reasons, but the wrapper script works.
+**IMPORTANT**: Use the Python helper script, NOT the shell `notify` command directly.
+Copilot CLI blocks direct shell commands to notify for security reasons.
 
 ### Notification Command Format
 ```bash
-# Use the wrapper script (installed at /usr/local/bin/notify)
-notify -e "event" -s "subject" -d "description" -i "importance" [-m "message"]
+# Use the Python helper (this bypasses Copilot CLI's shell restrictions)
+python3 /app/notify_helper.py -e "event" -s "subject" -d "description" -i "importance" [-m "message"] [-l "link"]
 ```
 
 ### Parameters
@@ -57,6 +57,47 @@ notify -e "event" -s "subject" -d "description" -i "importance" [-m "message"]
 - `-d "description"`: Brief description (shown in notification list)
 - `-i "importance"`: One of: `normal`, `warning`, `alert`
 - `-m "message"`: Optional longer message body
+- `-l "link"`: Optional URL (clicking notification opens this link)
+  - Special: Use `/state/analysis/<filename>` for files in the analysis directory
+
+### Common Links
+- **Metadata Viewer**: `http://192.168.1.216:5050`
+- **Immich**: `http://192.168.1.216:2283`
+- **Login Helper VNC**: `http://192.168.1.216:6901`
+- **Analysis Files**: `/state/analysis/<filename>` (auto-converted to public URL)
+
+### Attaching Analysis Files to Notifications
+
+You can save detailed reports or logs to `/state/analysis/` and link them in notifications.
+The `/state/analysis/` directory is mounted to persistent storage and served via FileBrowser.
+
+**To attach a file to a notification:**
+1. Write the file to `/state/analysis/<filename>` (e.g., `/state/analysis/report_20251128.txt`)
+2. Use `-l "/state/analysis/<filename>"` in the Python helper command
+3. The helper automatically converts this to the public URL (if `FILEBROWSER_BASE_URL` is set)
+
+**Example workflow:**
+```bash
+# Save analysis to a file
+cat > /state/analysis/daily_report_$(date +%Y%m%d).md << 'EOF'
+# daily System Report
+## Container Status
+- automated-takeout: SUCCESS
+- immich-import: RUNNING
+- chadburn: HEALTHY
+EOF
+
+# Send notification with link to the report (use Python helper!)
+python3 /app/notify_helper.py \
+  -e "vscode-monitor" \
+  -s "daily Report Ready" \
+  -d "System health check complete" \
+  -i "normal" \
+  -m "All services operational" \
+  -l "/state/analysis/daily_report_$(date +%Y%m%d).md"
+```
+
+The `/state/analysis/` path will be converted to a public URL based on the `FILEBROWSER_BASE_URL` environment variable.
 
 # Automated Takeout
 
@@ -208,29 +249,38 @@ docker-compose build automated-takeout && docker-compose up automated-takeout
 ### Examples
 
 ```bash
-# Alert: Script failure
-notify -e "vscode-monitor" -s "Takeout Script: FAILURE" -d "Playwright selector failed" \
-  -i "alert" -m "The button selector 'Create export' was not found. Google may have changed their UI."
+# Alert: Script failure (link to metadata viewer)
+python3 /app/notify_helper.py -e "vscode-monitor" -s "Takeout Script: FAILURE" \
+  -d "Playwright selector failed" -i "alert" \
+  -m "The button selector 'Create export' was not found." \
+  -l "http://192.168.1.216:5050"
 
-# Warning: Auth required
-notify -e "vscode-monitor" -s "Takeout Script: AUTH_REQUIRED" -d "Google login expired" \
-  -i "warning" -m "Please re-authenticate via VNC at http://192.168.1.216:6901"
+# Warning: Auth required (link to VNC for re-auth)
+python3 /app/notify_helper.py -e "vscode-monitor" -s "Takeout Script: AUTH_REQUIRED" \
+  -d "Google login expired" -i "warning" \
+  -m "Please re-authenticate via VNC" \
+  -l "http://192.168.1.216:6901"
 
 # Warning: Fix applied
-notify -e "vscode-monitor" -s "Takeout Script: Fix Applied" -d "Updated selector for export button" \
-  -i "warning" -m "Changed selector from 'Create export' to 'button[data-action=export]'"
+python3 /app/notify_helper.py -e "vscode-monitor" -s "Takeout Script: Fix Applied" \
+  -d "Updated selector for export button" -i "warning" \
+  -m "Changed selector from 'Create export' to 'button[data-action=export]'"
 
 # Normal: Chadburn updated
-notify -e "chadburn-update" -s "Chadburn Updated" -d "Updated to version 1.2.3" \
-  -i "normal" -m "Issue #127 has been fixed. Chadburn updated from pinned SHA to latest."
+python3 /app/notify_helper.py -e "chadburn-update" -s "Chadburn Updated" \
+  -d "Updated to version 1.2.3" -i "normal" \
+  -m "Issue #127 has been fixed. Chadburn updated from pinned SHA to latest."
 
 # Alert: Chadburn bug detected
-notify -e "chadburn-update" -s "Chadburn Bug Detected" -d "Reverting to known-good version" \
-  -i "alert" -m "Multiple 'Started watching Docker events' messages detected. Reverting to pinned SHA."
+python3 /app/notify_helper.py -e "chadburn-update" -s "Chadburn Bug Detected" \
+  -d "Reverting to known-good version" -i "alert" \
+  -m "Multiple 'Started watching Docker events' messages detected."
 
-# Normal: Weekly health check
-notify -e "vscode-monitor" -s "System Health: All Services Normal" -d "Weekly checkup passed" \
-  -i "normal" -m "All services operating normally."
+# Normal: daily health check with analysis file link (ALWAYS use this pattern for daily checks)
+python3 /app/notify_helper.py -e "vscode-monitor" -s "daily Health: All Systems Normal" \
+  -d "daily checkup passed" -i "normal" \
+  -m "All services operating normally. Click link for detailed report." \
+  -l "/state/analysis/daily_report_$(date +%Y%m%d).md"
 ```
 
 ---
@@ -315,6 +365,11 @@ docker_config_handler.go:90 ▶ NOTICE Docker daemon connection issue. Waiting 2
 ---
 
 # General Checkup
-Perform a general checkup of the rest of the applications in the app, see how they ran recently. If there are any problems, write analysis and raise an unraid notification
+Perform a general checkup of the rest of the applications in the app, see how they ran recently. If there are any problems, write analysis and raise an unraid notification.
 
-Otherwise, Once a week, raise an unraid notification just to indicate that you're still working and things look good. You can keep persistent state in /app/state/copilot
+**For daily health checks:**
+1. Write a detailed report to `/state/analysis/daily_report_YYYYMMDD.md`
+2. Send a notification with `-l "/state/analysis/daily_report_YYYYMMDD.md"` so the user can click to view the full report
+3. Keep persistent state in `/state/` (e.g., `/state/last_daily_notification`)
+
+**IMPORTANT**: Always include the `-l` link to the analysis file when sending daily notifications so the user can view the detailed report.

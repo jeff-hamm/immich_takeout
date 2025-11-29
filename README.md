@@ -46,9 +46,9 @@ See full installation guide below for details.
 - `/mnt/user/jumpdrive/gdrive/Takeout` - Synced Google Takeout folder
 - `/mnt/user/jumpdrive/gdrive` - Full Google Drive backup
 - `/mnt/user/backups/google-takeout/raw` - Import staging for Google Photos
-- `/mnt/user/appdata/rclone` - rclone configuration
-- `/mnt/user/appdata/gphotos/chromeuser` - Browser profile
-- `/mnt/user/appdata/takeout-script/cache` - API keys and state files
+- `${APP_ROOT}/rclone` - rclone configuration
+- `${APP_ROOT}/state/chromeuser` - Browser profile
+- `$APP_PATH/state` - API keys and state files
 
 ## Installation
 
@@ -91,7 +91,7 @@ See full installation guide below for details.
 
 6. **Create album state file**
    \`\`\`bash
-   nano /mnt/user/appdata/takeout-script/cache/album_state.yml
+   nano $APP_PATH/state/album_state.yml
    \`\`\`
 
 7. **Start services**

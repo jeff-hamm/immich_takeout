@@ -5,7 +5,16 @@
 # Determine script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Load environment variables from .env file (configurable path)
+# Try to find the main project .env file (parent directory of sd-import)
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+if [ -f "$PROJECT_DIR/.env" ]; then
+    source <(grep -v '^#' "$PROJECT_DIR/.env" | grep -E '^[A-Z_]+=' | sed 's/^/export /')
+fi
+
+# Application name for path defaults
+APP_NAME="${APP_NAME:-takeout-script}"
+
+# Load environment variables from local .env file (overrides)
 # Try local env file first, then fall back to configured path
 if [ -f "$SCRIPT_DIR/immich-go-upload.env" ]; then
     source <(grep -v '^#' "$SCRIPT_DIR/immich-go-upload.env" | sed 's/^/export /')
@@ -40,7 +49,10 @@ done
 
 # Fall back to environment variables if not provided via arguments
 IMMICH_SERVER="${SERVER:-${IMMICH_SERVER:-http://192.168.1.216:2283}}"
-API_KEY_FILE="${IMMICH_API_KEY_FILE:-/mnt/user/appdata/takeout-script/state/.immich_api_key}"
+# APP_ROOT and APP_PATH come from .env, with fallbacks
+APP_ROOT="${APP_ROOT:-/mnt/user/appdata}"
+APP_PATH="${APP_PATH:-${APP_ROOT}/${APP_NAME}}"
+API_KEY_FILE="${IMMICH_API_KEY_FILE:-${APP_PATH}/state/.immich_api_key}"
 
 # Determine API key: command line > environment variable > file
 if [ -n "$KEY" ]; then

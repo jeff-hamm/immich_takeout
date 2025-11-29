@@ -20,7 +20,7 @@ from pathlib import Path
 PROJECT_DIR = os.getenv("PROJECT_DIR", "/app")
 PROMPT_FILE = os.getenv("PROMPT_FILE", "/app/copilot_prompt.md")
 LOG_DIR = os.getenv("LOG_DIR", "/app/logs")
-ANALYSIS_DIR = os.getenv("ANALYSIS_DIR", "/app/analysis")
+ANALYSIS_DIR = os.getenv("ANALYSIS_DIR", "/state/analysis")
 CONTAINER = "automated-takeout"
 
 # GitHub token file (mounted from host state directory)
@@ -170,15 +170,9 @@ def load_prompt() -> str:
 def save_analysis(prompt: str, output: str, timestamp: str):
     """Save the analysis prompt and output to the analysis directory."""
     os.makedirs(ANALYSIS_DIR, exist_ok=True)
-    
-    # Save prompt
-    prompt_file = os.path.join(ANALYSIS_DIR, f"prompt_{timestamp}.txt")
-    with open(prompt_file, "w") as f:
-        f.write(prompt)
-    print(f"Prompt saved to: {prompt_file}")
-    
+        
     # Save output
-    output_file = os.path.join(ANALYSIS_DIR, f"analysis_{timestamp}.txt")
+    output_file = os.path.join(ANALYSIS_DIR, f"output_{timestamp}.txt")
     with open(output_file, "w") as f:
         f.write(output)
     print(f"Analysis saved to: {output_file}")

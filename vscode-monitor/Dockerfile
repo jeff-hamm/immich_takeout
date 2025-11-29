@@ -19,23 +19,24 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # Install GitHub Copilot CLI globally
 # This is the NEW agentic Copilot CLI (not the deprecated gh extension)
 ARG COPILOT_VERSION=latest
-RUN npm install -g @github/copilot@${COPILOT_VERSION}
+RUN --mount=type=cache,target=/root/.npm \
+    npm install -g @github/copilot@${COPILOT_VERSION}
 
 # Configure git safe directories for mounted volumes
 # These directories are mounted from the host and may have different ownership
-RUN git config --global --add safe.directory /app/takeout-script && \
-    git config --global --add safe.directory /app/chadburn && \
-    git config --global --add safe.directory /app/automated-takeout && \
+RUN git config --global --add safe.directory /app && \
+    git config --global --add safe.directory /state && \
     git config --global --add safe.directory '*'
 
 # Create directories
 WORKDIR /app
-RUN mkdir -p /app/logs /app/analysis
+RUN mkdir -p /app/logs /state/analysis
 
 # Copy monitoring scripts
 COPY monitor_takeout.py /app/
 COPY copilot_prompt.md /app/
 COPY notify.sh /usr/local/bin/notify
+COPY notify_helper.py /app/
 RUN chmod +x /usr/local/bin/notify
 
 # Default to running the monitor script

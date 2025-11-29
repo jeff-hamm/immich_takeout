@@ -50,8 +50,10 @@ udevadm control --reload-rules
 
 # Symlinks for persistent home directory storage
 # This allows VS Code Server to persist across reboots
-ln -sf /mnt/pool/appdata/home/.vscode-server /root/.vscode-server
-ln -sf /mnt/pool/appdata /root/appdata
+# Default APP_ROOT - will be updated from .env if available
+APP_ROOT="/mnt/pool/appdata"
+ln -sf "$APP_ROOT/home/.vscode-server" /root/.vscode-server
+ln -sf "$APP_ROOT" /root/appdata
 
 # Fix /etc/profile - remove cd $HOME line that interferes with SSH sessions
 # Unraid's default profile changes to home directory, which breaks VS Code Remote
@@ -62,10 +64,18 @@ if [ -f /boot/config/custom-scripts/bashrc ]; then
     cp /boot/config/custom-scripts/bashrc /root/.bashrc
 fi
 
+# Load APP_ROOT and APP_PATH from .env if available
+APP_PATH="$APP_ROOT/takeout-script"
+if [ -f "$APP_PATH/.env" ]; then
+    # Source APP_ROOT and APP_PATH from .env
+    eval $(grep '^APP_ROOT=' "$APP_PATH/.env")
+    eval $(grep '^APP_PATH=' "$APP_PATH/.env")
+fi
+
 # Symlink for GitHub Copilot CLI token (persists across reboots)
-# The token file lives in the takeout-script state directory
-if [ -f /mnt/user/appdata/takeout-script/state/.copilot-token ]; then
-    ln -sf /mnt/user/appdata/takeout-script/state/.copilot-token /root/.copilot-token
+# The token file lives in the project state directory
+if [ -f "$APP_PATH/state/.copilot-token" ]; then
+    ln -sf "$APP_PATH/state/.copilot-token" /root/.copilot-token
 fi
 
 # Increase /var/log tmpfs to 1GB (default is 128MB which fills up quickly)

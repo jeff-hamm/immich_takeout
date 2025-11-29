@@ -38,7 +38,7 @@ DEFAULT_IMMICH_API_KEY = os.getenv("IMMICH_API_KEY", None)
 DEFAULT_METADATA_DIR = Path(os.getenv("METADATA_DIR", "/data/metadata"))
 DEFAULT_LOG_DIR = Path(os.getenv("LOG_DIR", str(DEFAULT_METADATA_DIR / "logs")))
 DEFAULT_EXTRACT_DIR = Path(os.getenv("EXTRACT_DIR", "/data/extracted"))
-DEFAULT_MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
+DEFAULT_MAX_RETRIES = int(os.getenv("MAX_RETRIES", "1"))
 DEFAULT_RETRY_DELAY = int(os.getenv("RETRY_DELAY", "30"))
 DEFAULT_COPY_FAILED_FILES = os.getenv("COPY_FAILED_FILES", "false").lower() == "true"
 DEFAULT_PAUSE_IMMICH_JOBS = os.getenv("PAUSE_IMMICH_JOBS", "false").lower() == "true"
@@ -220,6 +220,20 @@ def status_to_disposition(status: str | None) -> str:
         return 'error'
     else:
         return 'processed'
+
+
+def is_imported_status(status: str | None) -> bool:
+    """
+    Check if a status indicates the file was successfully imported to Immich.
+    
+    Returns True for statuses where the file content is now in Immich:
+    - uploaded: New file uploaded
+    - upgraded: Existing file replaced with better version
+    - server_duplicate: Already exists on server (no action needed)
+    - local_duplicate: Duplicate of another file being uploaded
+    - server_better: Server has better version (kept)
+    """
+    return status in ('uploaded', 'upgraded', 'server_duplicate', 'local_duplicate', 'server_better')
 
 
 def file_result_to_manifest_entry(filename: str, result: dict) -> dict:

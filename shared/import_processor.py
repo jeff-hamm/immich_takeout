@@ -174,6 +174,14 @@ class ImportProcessor:
         except Exception as e:
             print(f"[WARNING] Failed to update metadata: {e}")
         
+        # Track failed jobs - don't delete files from failed imports
+        if not is_success or has_errors:
+            error_count = immich_results.get('summary', {}).get('errors', 0)
+            reason = f"exit_code={exit_code}, errors={error_count}"
+            zip_file_info = [{'name': z.name, 'path': str(z)} for z in zip_files]
+            self.runner.add_failed_job(export_prefix, reason, zip_file_info)
+            print(f"[WARNING] Job added to failed queue: {export_prefix}")
+        
         # Delete zips only if successful and no errors
         if delete_after_import and is_success and not has_errors:
             deleted_count = 0
@@ -308,6 +316,13 @@ class ImportProcessor:
             final_status = 'completed_with_errors'
         else:
             final_status = 'failed'
+        
+        # Track failed jobs
+        if not is_success or has_errors:
+            error_count = immich_results.get('summary', {}).get('errors', 0)
+            reason = f"exit_code={exit_code}, errors={error_count}"
+            self.runner.add_failed_job(str(folder_path), reason, [])
+            print(f"[WARNING] Job added to failed queue: {folder_path}")
         
         # Update metadata with final status and results
         try:

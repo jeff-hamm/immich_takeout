@@ -4,7 +4,7 @@
 # Examples:
 #   .\deploy.ps1 -RemoteHost 192.168.1.216
 #   .\deploy.ps1 -RemoteHost 192.168.1.216 -RemoteUser root
-#   .\deploy.ps1 -RemoteHost 192.168.1.216 -RemoteUser root -RemotePath /mnt/user/appdata/takeout-script
+#   .\deploy.ps1 -RemoteHost 192.168.1.216 -RemoteUser root -RemotePath $APP_PATH
 #   .\deploy.ps1 -RemoteHost 192.168.1.216 -Branch dev
 
 [CmdletBinding()]

@@ -5,8 +5,8 @@
 # Examples:
 #   ./deploy.sh 192.168.1.216
 #   ./deploy.sh 192.168.1.216 root
-#   ./deploy.sh 192.168.1.216 root /mnt/user/appdata/takeout-script
-#   ./deploy.sh 192.168.1.216 root /mnt/user/appdata/takeout-script main
+#   ./deploy.sh 192.168.1.216 root $APP_PATH
+#   ./deploy.sh 192.168.1.216 root $APP_PATH main
 
 set -e
 
@@ -31,8 +31,8 @@ print_usage() {
     echo "Examples:"
     echo "  $0 192.168.1.216"
     echo "  $0 192.168.1.216 root"
-    echo "  $0 192.168.1.216 root /mnt/user/appdata/takeout-script"
-    echo "  $0 192.168.1.216 root /mnt/user/appdata/takeout-script dev"
+    echo "  $0 192.168.1.216 root $APP_PATH"
+    echo "  $0 192.168.1.216 root $APP_PATH dev"
 }
 
 if [ -z "$1" ]; then

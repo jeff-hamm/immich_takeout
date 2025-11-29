@@ -293,9 +293,16 @@ def find_takeout_exports(takeout_dir: Path, file_filter: str):
     
     print(f"[INFO] Found {len(exports)} unique takeout export(s)")
     
-    # Check each export to see if it contains Google Photos (sorted newest first)
+    # Check each export to see if it contains Google Photos
+    # Sort by total size (smallest first) to process quick ones first
     exports_to_import = []
-    for export_prefix, export_data in sorted(exports.items(), reverse=True):
+    
+    def get_export_size(item):
+        """Get total size of all zips in an export."""
+        export_prefix, export_data = item
+        return sum(z.stat().st_size for z in export_data['zips'] if z.exists())
+    
+    for export_prefix, export_data in sorted(exports.items(), key=get_export_size):
         zip_files = export_data['zips']
         zip_files.sort()
         
@@ -332,7 +339,11 @@ def find_takeout_exports(takeout_dir: Path, file_filter: str):
 
 
 def import_export_to_immich(export_prefix, zip_files):
-    """Use immich-go to import a Google Takeout export (possibly multi-part)."""
+    """Use immich-go to import a Google Takeout export (possibly multi-part).
+    
+    Returns True if import succeeded, False if failed.
+    Note: Failed jobs are tracked in the runner's failed_jobs queue.
+    """
     
     processor = ImportProcessor.get_instance()
     
@@ -346,7 +357,11 @@ def import_export_to_immich(export_prefix, zip_files):
 
 
 def process_google_takeout(takeout_dir: Path, file_filter: str):
-    """Check for and process any new takeout exports."""
+    """Check for and process any new takeout exports.
+    
+    Processes all exports, continuing even if some fail.
+    Failed jobs are tracked and summarized at the end.
+    """
     exports = find_takeout_exports(takeout_dir, file_filter)
 
     if not exports:
@@ -356,11 +371,22 @@ def process_google_takeout(takeout_dir: Path, file_filter: str):
     print(f"[INFO] Found {len(exports)} takeout export(s) with Google Photos to import")
 
     processed = 0
+    failed = 0
 
     for export_prefix, zip_files in exports:
-        print(f"[INFO] Processing {processed + 1}/{len(exports)}: {export_prefix}")
-        if import_export_to_immich(export_prefix, zip_files):
-            processed += 1
+        print(f"[INFO] Processing {processed + failed + 1}/{len(exports)}: {export_prefix}")
+        try:
+            if import_export_to_immich(export_prefix, zip_files):
+                processed += 1
+            else:
+                failed += 1
+                print(f"[WARNING] Import failed for {export_prefix}, continuing with next...")
+        except Exception as e:
+            failed += 1
+            print(f"[ERROR] Exception during import of {export_prefix}: {e}")
+            print(f"[WARNING] Continuing with next export...")
+            import traceback
+            traceback.print_exc()
 
     return processed
 
@@ -463,6 +489,12 @@ def main():
                 print(f"[INFO] Processed {processed} file(s)")
             else:
                 print(f"[INFO] No new files found")
+            
+            # Print failed jobs summary if any
+            processor = ImportProcessor.get_instance()
+            if processor.runner.has_failed_jobs():
+                processor.runner.print_failed_jobs_summary()
+            
             print("[INFO] Import check completed successfully")
         except Exception as e:
             print(f"[ERROR] Import failed: {e}")

@@ -20,7 +20,7 @@ def get_api_key(api_key_file: str = None) -> str:
     
     # Try file
     if api_key_file is None:
-        api_key_file = os.getenv("IMMICH_API_KEY_FILE", "/app/state/.immich_api_key")
+        api_key_file = os.getenv("IMMICH_API_KEY_FILE", "/state/.immich_api_key")
     
     key_path = Path(api_key_file)
     if key_path.exists():
