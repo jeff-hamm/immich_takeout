@@ -186,6 +186,7 @@ services:
       - UNRAID_NOTIFY=/unraid/notify
       # Application name for paths
       - APP_NAME=${APP_NAME:-takeout-script}
+      - APP_ROOT=${APP_ROOT:-/mnt/user/appdata}
       # FileBrowser config for analysis file links
       - FILEBROWSER_BASE_URL=${FILEBROWSER_BASE_URL:-}
       - FILEBROWSER_ANALYSIS_PATH=${FILEBROWSER_ANALYSIS_PATH:-}
@@ -193,35 +194,18 @@ services:
       # Docker socket for container management (restart, logs, build)
       - /var/run/docker.sock:/var/run/docker.sock
       - .:/app:rw
-      - ./state:/state
-      - ${CHADBURN_DOCKERFILE}:/app/chadburn/docker-compose.yml:rw
+      - ./state:/state:rw
+      - ./docker-compose.yml:/app/docker-compose.yml:ro
+      - ${APP_ROOT}/onedrive/docker:/app/onedrive:ro
+      - ${APP_ROOT}/immich/docker:/app/immich:ro
+      - ${APP_ROOT}/jumpflix/docker:/app/jumpflix:ro
+      - ${APP_ROOT}/chadburn/docker-compose.yml:/app/chadburn/docker-compose.yml:rw
+      - ${APP_ROOT}:${APP_ROOT}:ro
       - ./vscode-monitor/copilot_prompt.md:/app/copilot_prompt.md:ro
       - ./state/.copilot-token:/root/.copilot-token:ro
     working_dir: /app
     network_mode: bridge
     labels:
       - "chadburn.enabled=true"
-      # Run 30 minutes after automated-takeout to check for failures
-      - "chadburn.job-exec.vscode-monitor.schedule=40 1 * * *"
+      - "chadburn.job-exec.vscode-monitor.schedule=0 6 * * *"
       - "chadburn.job-exec.vscode-monitor.command=python3 /app/monitor_takeout.py"
-
-  # sd-import:
-  #   # Uses the immich-import image in 'folder' mode
-  #   image: immich-import:latest
-  #   container_name: sd-import
-  #   restart: "no"
-  #   depends_on:
-  #     - immich-import  # Ensures image is built
-  #   environment:
-  #     - IMMICH_API_URL=${IMMICH_SERVER}/api
-  #     - IMMICH_API_KEY_FILE=/run/secrets/immich_api_key
-  #     - METADATA_DIR=/data/metadata
-  #     - DELETE_AFTER_IMPORT=false
-  #   volumes:
-  #     - /mnt/user/imports/sd-cards:/data/import
-  #     - ${STATE_PATH}/.immich_api_key:/run/secrets/immich_api_key:ro
-  #     - ${IMPORTS_PATH}/metadata:/data/metadata
-  #   network_mode: bridge
-  #   command: ["python", "/app/immich_import.py", "folder", "--source-type", "sd-card", "--copy-failed"]
-  #   labels:
-  #     - "net.unraid.docker.managed=composeman"

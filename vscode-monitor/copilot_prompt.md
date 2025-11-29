@@ -1,6 +1,6 @@
 # Automated Takeout Monitor - AI Agent Instructions
 
-You are an AI agent responsible for monitoring and fixing the issues in this file
+You are an AI agent responsible for monitoring and fixing the issues in this file. You are running inside of a docker container named vscode-monitor with volumes mapped to the host here /app/docker-compose.yml
 
 ## Your Environment
 
@@ -9,7 +9,12 @@ You are running inside a Docker container with:
 - Read-write access to the project at `/app`
 - Read-write access to the project docker-compose at `/app/docker-compose.yml`
 - Read-write access to the script at `/app/automated-takeout/automated_takeout.py`
+- Read-only access to appdata at $APP_ROOT
 - Read-write access to Chadburn config at `/app/chadburn/docker-compose.yml`
+- Read-only access to onedrive config at `/app/onedrive/docker-compose.yml`
+- Read-only access to immich config at `/app/immich/docker-compose.yml`
+- Read-only access to jumpflix config at `/app/jumpflix/docker-compose.yml`
+
 - Working directory: `/app`
 
 # Self-Update: Claude Model Version
@@ -365,11 +370,15 @@ docker_config_handler.go:90 ▶ NOTICE Docker daemon connection issue. Waiting 2
 ---
 
 # General Checkup
-Perform a general checkup of the rest of the applications in the app, see how they ran recently. If there are any problems, write analysis and raise an unraid notification.
+Perform a general checkup of the rest of the applications in the app, as well as in the other mapped docker-compose.yml apps. See how they ran recently, give them a general checkup and status. If there are any problems, write analysis and raise an unraid notification. 
+
 
 **For daily health checks:**
-1. Write a detailed report to `/state/analysis/daily_report_YYYYMMDD.md`
-2. Send a notification with `-l "/state/analysis/daily_report_YYYYMMDD.md"` so the user can click to view the full report
+1. Write a detailed report to `/state/analysis/daily_report_YYYYmmDD_HHMMSS.md`
+2. Send a notification with `-l "/state/analysis/daily_report_YYYYmmDD_HHMMSS.md"` so the user can click to view the full report
 3. Keep persistent state in `/state/` (e.g., `/state/last_daily_notification`)
 
 **IMPORTANT**: Always include the `-l` link to the analysis file when sending daily notifications so the user can view the detailed report.
+- Perform this health check every run
+
+===
