@@ -470,7 +470,87 @@ else
     print_warning "Skipping SD card auto-import installation (no reader specified)"
 fi
 
-print_header "Step 6: Build and Start Docker Services"
+print_header "Step 6: GitHub Copilot CLI Authentication (Optional)"
+
+COPILOT_TOKEN_FILE="$STATE_DIR/.copilot-token"
+
+echo "The vscode-monitor service uses GitHub Copilot CLI to auto-fix Playwright scripts."
+echo "This requires a GitHub Personal Access Token (PAT) with 'Copilot Requests' permission."
+echo ""
+
+if [ -f "$COPILOT_TOKEN_FILE" ] && [ -s "$COPILOT_TOKEN_FILE" ]; then
+    print_warning "Copilot token already exists at $COPILOT_TOKEN_FILE"
+    if ! confirm "Replace existing Copilot token?" "n"; then
+        echo "Keeping existing token..."
+        SKIP_COPILOT=true
+    fi
+fi
+
+if [ "$SKIP_COPILOT" != "true" ]; then
+    if confirm "Configure GitHub Copilot CLI authentication?" "y"; then
+        echo ""
+        echo "To create a token with Copilot access:"
+        echo "1. Go to: https://github.com/settings/personal-access-tokens/new"
+        echo "2. Give it a name like 'takeout-script-copilot'"
+        echo "3. Under 'Permissions', click 'Account permissions'"
+        echo "4. Find 'Copilot' and set it to 'Read-only'"
+        echo "5. Generate and copy the token"
+        echo ""
+        
+        prompt_required "Paste your GitHub PAT with Copilot permission" "COPILOT_TOKEN" "true"
+        
+        # Save the token
+        echo "$COPILOT_TOKEN" > "$COPILOT_TOKEN_FILE"
+        chmod 600 "$COPILOT_TOKEN_FILE"
+        print_success "Copilot token saved to $COPILOT_TOKEN_FILE"
+        
+        # Create symlink for root access (persists via go file on reboot)
+        ln -sf "$COPILOT_TOKEN_FILE" /root/.copilot-token
+        print_success "Created symlink /root/.copilot-token -> $COPILOT_TOKEN_FILE"
+    else
+        print_warning "Skipping Copilot authentication"
+        echo "The vscode-monitor service will not be able to auto-fix scripts."
+        echo "You can configure it later by creating: $COPILOT_TOKEN_FILE"
+    fi
+fi
+
+print_header "Step 7: Unraid Shell Customizations"
+
+echo "Installing shell customizations for Unraid persistence..."
+
+UNRAID_SCRIPTS_DIR="/boot/config/custom-scripts"
+mkdir -p "$UNRAID_SCRIPTS_DIR"
+
+# Install custom bashrc with docker aliases
+if [ -f "$SCRIPT_DIR/unraid/bashrc" ]; then
+    cp "$SCRIPT_DIR/unraid/bashrc" "$UNRAID_SCRIPTS_DIR/bashrc"
+    cp "$UNRAID_SCRIPTS_DIR/bashrc" /root/.bashrc
+    print_success "Installed custom bashrc with docker aliases (d, dc, dcr, etc.)"
+else
+    print_warning "unraid/bashrc not found, skipping"
+fi
+
+# Install go file (boot script)
+if [ -f "$SCRIPT_DIR/unraid/go" ]; then
+    # Get API key if available
+    API_KEY=""
+    if [ -f "$API_KEY_FILE" ] && [ -s "$API_KEY_FILE" ]; then
+        API_KEY=$(cat "$API_KEY_FILE")
+    fi
+    
+    # Replace placeholder with actual API key and install
+    sed "s/__IMMICH_API_KEY__/$API_KEY/" "$SCRIPT_DIR/unraid/go" > /boot/config/go
+    chmod +x /boot/config/go
+    print_success "Installed Unraid boot script (/boot/config/go)"
+    
+    # Apply profile fix immediately
+    sed -i '/^cd \$HOME$/d' /etc/profile
+    print_success "Applied profile fix (removed cd \$HOME)"
+else
+    print_warning "unraid/go not found, skipping"
+fi
+
+print_header "Step 8: Build and Start Docker Services"
 
 echo "Building Docker images..."
 cd "$SCRIPT_DIR"

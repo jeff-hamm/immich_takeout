@@ -1,0 +1,40 @@
+#!/bin/bash
+# Custom bashrc for Unraid
+# Install location: /boot/config/custom-scripts/bashrc
+# Copied to /root/.bashrc by /boot/config/go at boot
+
+# Don't source /etc/profile or .bash_profile here - they're already run by login shells
+# and sourcing them again causes cd $HOME
+
+# Docker aliases
+alias d='docker'
+alias dc='docker-compose'
+
+# Docker-compose helper function
+# Usage: dcr <service> [service2 ...]
+# Builds, restarts, and tails logs for the specified service(s)
+dcr() {
+    if [ $# -eq 0 ]; then
+        echo "Usage: dcr <service> [service2 ...]"
+        echo "Builds, restarts (up -d), and tails logs for the specified service(s)"
+        return 1
+    fi
+    echo "Building $@..."
+    docker-compose build "$@" && \
+    echo "Starting $@..." && \
+    docker-compose up -d --force-recreate "$@" && \
+    echo "Tailing logs for $@... (Ctrl+C to exit)" && \
+    docker-compose logs -f "$@"
+}
+
+# Shorter aliases
+alias dcu='docker-compose up -d'
+alias dcl='docker-compose logs -f'
+alias dcb='docker-compose build'
+
+# Helpful docker shortcuts
+alias dps='docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"'
+alias dpsa='docker ps -a --format "table {{.Names}}\t{{.Status}}"'
+
+# Quick navigation
+alias ts='cd /mnt/user/appdata/takeout-script'

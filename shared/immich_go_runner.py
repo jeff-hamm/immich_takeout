@@ -3,6 +3,7 @@
 ImmichGoRunner - Unified runner for immich-go uploads with retry logic and error handling.
 Used by both immich_import.py (Google Photos zips) and sd_import.py (folders).
 """
+import copy
 import json
 import subprocess
 import threading
@@ -93,17 +94,23 @@ def create_metadata_callback(metadata: 'ImportMetadata') -> Callable[[dict], Non
                     manifest_entry['tags'].append(tag)
                     metadata.save()
         # Also call default callback for logging
-        default_result_callback(result)
+        default_result_callback(metadata,result)
     
     return callback
 
 
-def default_result_callback(result: dict) -> None:
+def default_result_callback(metadata: 'ImportMetadata', result: dict) -> None:
     """Default callback that logs each result."""
+    import sys
 
     event_type = result.get('event_type', 'unknown')
     
     if event_type == 'file_result':
+        # Print newline to clear discovery progress line on first file result
+        if not metadata.get('_discovery_done'):
+            metadata['_discovery_done'] = True
+            print()  # Clear the discovery progress line
+        
         status = result.get('status', 'unknown')
         filename = result.get('path', 'unknown')
         reason = result.get('reason', '')
@@ -126,10 +133,22 @@ def default_result_callback(result: dict) -> None:
     # elif event_type == 'album_created':
     #     print(f"[ALBUM] Created: {result.get('album', '')}")
     elif event_type == 'discovery':
-        # Don't log every discovery - too noisy
-        pass
+        # Increment media file count and show progress
+        # Show discovery progress as percentage
+        total_files = metadata.get('total_files', 0)
+        media_type = result.get('media_type', '')
+        media_files = metadata.get('total_media_files', 0)
+        if media_type in ('image', 'video'):
+            metadata['total_media_files'] = media_files + 1
+        
+        discovered_files = metadata.get('discovered_files', 0) + 1
+        metadata['discovered_files'] = discovered_files
+        if total_files > 0:
+            pct = (discovered_files / total_files) * 100
+            print(f"\r[DISCOVER] Scanning... {discovered_files}/{total_files} ({pct:.1f}%) [Media Files: {media_files}]", end='', flush=True)
+            sys.stdout.flush()
     elif event_type == 'error':
-        print(f"[ERROR] {result.get('error', result.get('message', ''))}")
+        print(f"\n[ERROR] {result.get('error', result.get('message', ''))}")
 
 
 class ImmichGoRunner:
@@ -170,11 +189,17 @@ class ImmichGoRunner:
         log_file: Path,
         stop_event: threading.Event,
         results_accumulator: dict,
-        result_callback: Optional[Callable[[dict], None]] = None
+        result_callback: Optional[Callable[[dict], None]] = None,
+        metadata: Optional['ImportMetadata'] = None,
+        heartbeat_interval: float = 30.0
     ) -> None:
         """
         Tail a log file in real-time, parsing entries and calling the callback.
         Also accumulates results for final summary.
+        
+        Args:
+            metadata: Optional ImportMetadata to update periodically (heartbeat)
+            heartbeat_interval: Seconds between heartbeat saves (default 30s)
         """
         # Wait for log file to be created
         wait_count = 0
@@ -189,11 +214,20 @@ class ImmichGoRunner:
         albums_set = set()
         tags_set = set()
         
+        # Track time for heartbeat
+        last_heartbeat = time.time()
+        
         with open(log_file, 'r') as f:
             while not stop_event.is_set():
                 line = f.readline()
                 if not line:
-                    # No new data, wait a bit
+                    # No new data - check if we need to send heartbeat
+                    if metadata and (time.time() - last_heartbeat) >= heartbeat_interval:
+                        try:
+                            metadata.save()
+                            last_heartbeat = time.time()
+                        except Exception as e:
+                            print(f"[WARNING] Heartbeat save failed: {e}")
                     time.sleep(0.05)
                     continue
                 
@@ -323,9 +357,14 @@ class ImmichGoRunner:
         cmd: list[str],
         log_file: Path,
         description: str,
-        result_callback: Optional[Callable[[dict], None]] = None
+        result_callback: Optional[Callable[[dict], None]] = None,
+        metadata: Optional['ImportMetadata'] = None
     ) -> tuple[int, dict]:
-        """Run command with retry logic and real-time log parsing. Returns (exit_code, parsed_results)."""
+        """Run command with retry logic and real-time log parsing. Returns (exit_code, parsed_results).
+        
+        Args:
+            metadata: Optional ImportMetadata to update with heartbeat during long runs
+        """
         last_exit_code = -1
         last_results = self._create_empty_results()
         
@@ -341,11 +380,12 @@ class ImmichGoRunner:
             # Create fresh results accumulator for this attempt
             results_accumulator = self._create_empty_results()
             
-            # Start log tailing thread
+            # Start log tailing thread with heartbeat if metadata provided
             stop_event = threading.Event()
             tail_thread = threading.Thread(
                 target=self._tail_log_file,
                 args=(log_file, stop_event, results_accumulator, result_callback),
+                kwargs={'metadata': metadata, 'heartbeat_interval': 30.0} if metadata else {},
                 daemon=True
             )
             tail_thread.start()
@@ -356,12 +396,14 @@ class ImmichGoRunner:
                 last_exit_code = result.returncode
             finally:
                 # Stop the tail thread and wait for it to finish processing
-                time.sleep(0.2)  # Give time to process final log entries
+                time.sleep(0.3)  # Give time to process final log entries
                 stop_event.set()
-                tail_thread.join(timeout=2.0)
+                tail_thread.join(timeout=5.0)
+                if tail_thread.is_alive():
+                    print("[WARNING] Log tail thread still running after timeout, results may be incomplete")
             
             # Use accumulated results from real-time parsing
-            last_results = results_accumulator
+            last_results = copy.deepcopy(results_accumulator)  # Deep copy to avoid race conditions
             
             # Calculate duration if we have timestamps
             if last_results['summary']['start_time'] and last_results['summary']['end_time']:
@@ -538,7 +580,7 @@ class ImmichGoRunner:
         # Create files list and callback for real-time manifest updates
         metadata_callback = create_metadata_callback(metadata)
         exit_code, results = self._run_with_retry(
-            cmd, log_file, f"Google Photos import {export_prefix}", metadata_callback
+            cmd, log_file, f"Google Photos import {export_prefix}", metadata_callback, metadata
         )
         
         
@@ -584,7 +626,7 @@ class ImmichGoRunner:
         metadata_callback = create_metadata_callback(metadata)
         
         exit_code, results = self._run_with_retry(
-            cmd, log_file, f"folder import {folder_path.name}", metadata_callback
+            cmd, log_file, f"folder import {folder_path.name}", metadata_callback, metadata
         )
                 
         return exit_code, results

@@ -211,7 +211,7 @@
                 <div class="label">Total Imports</div>
             </div>
             <div class="stat-card blue">
-                <div class="value">{{ stats.total_files }}</div>
+                <div class="value">{{ stats.file_count }}</div>
                 <div class="label">Files Processed</div>
             </div>
             <div class="stat-card green">
@@ -249,7 +249,7 @@
                             <th>Size</th>
                             <th>Files</th>
                             <th>Started</th>
-                            <th>Duration</th>
+                            <th>Last Modified</th>
                             <th>Summary</th>
                             <th>Actions</th>
                         </tr>
@@ -287,7 +287,7 @@
                                 {% endif %}
                             </td>
                             <td>{{ m._zip_size_formatted or 'N/A' }}</td>
-                            <td>{{ m.total_files or (m.files|length if m.files else '-') }}</td>
+                            <td>{{ m.file_count or (m.files|length if m.files else '-') }}/{{ m.total_media_files or m._total_files or '-' }}</td>
                             <td>
                                 {% if m.start_time %}
                                 {{ m.start_time[:16].replace('T', ' ') }}
@@ -297,15 +297,7 @@
                                 N/A
                                 {% endif %}
                             </td>
-                            <td>
-                                {% if m.duration_seconds %}
-                                {{ (m.duration_seconds / 60)|round(1) }} min
-                                {% elif m.status == 'running' %}
-                                <span style="color: var(--accent-blue);">In progress...</span>
-                                {% else %}
-                                -
-                                {% endif %}
-                            </td>
+                            <td>{{ m._modified or '-' }}</td>
                             <td>
                                 {% if m.summary %}
                                 <div class="summary-bar">
@@ -370,7 +362,7 @@
                         <tr>
                             <td>{{ log.name }}</td>
                             <td>{{ log.size }}</td>
-                            <td>{{ log.modified[:10] }}</td>
+                            <td>{{ log.modified }}</td>
                             <td>
                                 <a href="/logs/{{ log.name }}" class="view-btn">View</a>
                             </td>

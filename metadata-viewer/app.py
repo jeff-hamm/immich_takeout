@@ -32,12 +32,18 @@ def load_metadata_files():
     
     for f in METADATA_DIR.glob("*.metadata.json"):
         try:
+            # Get file modification time from OS
+            file_mtime = datetime.fromtimestamp(f.stat().st_mtime)
+            
             with open(f) as mf:
                 data = json.load(mf)
                 data['_filename'] = f.name
                 data['_path'] = str(f)
+                data['_modified'] = file_mtime.strftime('%Y-%m-%d %H:%M:%S')
+                data['_modified_iso'] = file_mtime.isoformat()
                 
-                # Check for timeout: if status is 'running' and update_time is older than 5 minutes
+                # Check for timeout: if status is 'running' and update_time is older than 2 minutes
+                # Also check if the associated log file is still being written to
                 if data.get('status') == 'running' and 'update_time' in data:
                     try:
                         update_time = datetime.fromisoformat(data['update_time'].replace('Z', '+00:00'))
@@ -49,8 +55,20 @@ def load_metadata_files():
                         else:
                             age_seconds = (now - update_time).total_seconds()
                         
-                        if age_seconds > 300:  # 5 minutes
+                        # Check if log file exists and was recently modified
+                        log_file = data.get('immich_go_log')
+                        log_active = False
+                        if log_file and age_seconds > 60:  # Only check log if metadata is stale
+                            log_path = METADATA_DIR / log_file
+                            if log_path.exists():
+                                log_mtime = datetime.fromtimestamp(log_path.stat().st_mtime)
+                                log_age = (now - log_mtime).total_seconds()
+                                log_active = log_age < 120  # Log modified in last 2 minutes
+                        
+                        # Only mark as timeout if both metadata and log are stale
+                        if age_seconds > 120 and not log_active:  # 2 minutes
                             data['status'] = 'timeout'
+                            data['_timeout_age'] = int(age_seconds)
                     except (ValueError, TypeError):
                         pass
                 
@@ -76,9 +94,9 @@ def load_metadata_files():
         except Exception as e:
             print(f"Error loading {f}: {e}")
     
-    # Sort by start_time descending (newest first), falling back to extraction_date or empty string
+    # Sort by file modification time descending (most recently modified first)
     metadata_files.sort(
-        key=lambda m: m.get('start_time') or m.get('extraction_date') or '',
+        key=lambda m: m.get('_modified_iso') or '',
         reverse=True
     )
     
@@ -92,15 +110,20 @@ def get_log_files():
         return []
     
     logs = []
-    for f in sorted(logs_dir.glob("*.log"), reverse=True):
+    for f in logs_dir.glob("*.log"):
         stat = f.stat()
+        mtime = datetime.fromtimestamp(stat.st_mtime)
         logs.append({
             'name': f.name,
             'path': str(f),
             'size': format_size(stat.st_size),
             'created': datetime.fromtimestamp(stat.st_ctime).isoformat(),
-            'modified': datetime.fromtimestamp(stat.st_mtime).isoformat()
+            'modified': mtime.strftime('%Y-%m-%d %H:%M:%S'),
+            'modified_iso': mtime.isoformat()
         })
+    
+    # Sort by modification time descending (most recently modified first)
+    logs.sort(key=lambda l: l['modified_iso'], reverse=True)
     return logs
 
 
@@ -108,7 +131,7 @@ def aggregate_stats(metadata_files):
     """Aggregate statistics across all imports."""
     stats = {
         'total_imports': len(metadata_files),
-        'total_files': 0,
+        'file_count': 0,
         'total_size': 0,
         'by_type': {'immich-go': 0, 'extract': 0},
         'by_source': {'google-photos': 0, 'google-takeout': 0, 'sd-card': 0, 'folder': 0},
@@ -121,7 +144,7 @@ def aggregate_stats(metadata_files):
     }
     
     for m in metadata_files:
-        stats['total_files'] += m.get('total_files', 0)
+        stats['file_count'] += m.get('file_count', 0)
         
         # Handle both zip_files array and old zip_size format
         if 'zip_files' in m:

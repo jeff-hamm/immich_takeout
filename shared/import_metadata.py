@@ -4,6 +4,7 @@ ImportMetadata class for tracking import status and results.
 The metadata object itself, not a builder pattern.
 """
 import json
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
@@ -129,7 +130,7 @@ class ImportMetadata(dict):
         self.update({
             "source_name": source_name,
             "zip_files": zip_files_info,
-            "file_count": file_count,
+            "total_files": file_count,
             "files": self.files,
             "total_size": total_size,
             "import_dir": str(self.import_dir),
@@ -160,7 +161,7 @@ class ImportMetadata(dict):
         self.update({
             "source_path": str(folder_path),
             "total_size": total_size,
-            "file_count": file_count,
+            "total_files": file_count,
             "immich_go_log": f"logs/upload-{folder_path.name}.immich-go.{timestamp}.log",
         })
         return source_name
@@ -228,12 +229,17 @@ class ImportMetadata(dict):
         return instance
     
     def save(self) -> Path:
-        """Save metadata to JSON file."""
+        """Save metadata to JSON file with atomic write for network filesystems."""
         try:
             self['update_time'] = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-            with open(self._file_path, 'w') as f:
+            # Write to temp file first, then rename for atomicity
+            tmp_path = self._file_path.with_suffix('.tmp')
+            with open(tmp_path, 'w') as f:
                 json.dump(dict(self), f, indent=2)
-#            print(f"[INFO] Saved metadata: {self._file_path.name}")
+                f.flush()
+                os.fsync(f.fileno())
+            # Atomic rename
+            tmp_path.rename(self._file_path)
             return self._file_path
         except Exception as e:
             print(f"[ERROR] Failed to save metadata: {e}")

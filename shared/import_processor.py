@@ -255,7 +255,7 @@ class ImportProcessor:
             }
         
         # Check if folder is empty (from metadata or direct check)
-        if metadata.get('file_count', 0) == 0:
+        if metadata.get('total_files', 0) == 0:
             print(f"[INFO] No files found in {folder_path}")
             return True, {'summary': {}, 'files': {}}
         

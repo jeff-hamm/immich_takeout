@@ -140,86 +140,6 @@ def get_zip_media_files(zip_files):
                 })
     return media_files
 
-
-def verify_import(zip_files, runner: ImmichGoRunner):
-    """Verify that all media files from zips are now in Immich."""
-    import urllib.request
-    import urllib.error
-    import json
-    
-    media_files = get_zip_media_files(zip_files)
-    if not media_files:
-        print(f"[WARNING] No media files found in zips to verify")
-        return True  # Nothing to verify
-    
-    print(f"[INFO] Verifying {len(media_files)} media files are in Immich...")
-    
-    server_url = runner.server_url
-    
-    try:
-        # Use search to check for assets - search by original filename
-        # We'll sample check a subset of files to verify import worked
-        sample_size = min(50, len(media_files))  # Check up to 50 files
-        import random
-        samples = random.sample(media_files, sample_size) if len(media_files) > sample_size else media_files
-        
-        verified = 0
-        missing = []
-        
-        for media in samples:
-            # Search for this file in Immich
-            search_url = f"{server_url}/api/search/metadata"
-            search_data = json.dumps({
-                "originalFileName": media['filename']
-            }).encode('utf-8')
-            
-            req = urllib.request.Request(
-                search_url,
-                data=search_data,
-                headers={
-                    'x-api-key': runner.api_key,
-                    'Content-Type': 'application/json'
-                },
-                method='POST'
-            )
-            
-            try:
-                with urllib.request.urlopen(req, timeout=30) as response:
-                    result = json.loads(response.read().decode('utf-8'))
-                    assets = result.get('assets', {}).get('items', [])
-                    
-                    if assets:
-                        verified += 1
-                    else:
-                        missing.append(media['filename'])
-            except urllib.error.HTTPError as e:
-                print(f"[WARNING] HTTP error checking {media['filename']}: {e.code}")
-                missing.append(media['filename'])
-            except Exception as e:
-                print(f"[WARNING] Error checking {media['filename']}: {e}")
-                # Don't count as missing if it's a network error
-        
-        if missing:
-            # Allow some tolerance - immich-go may skip duplicates
-            missing_pct = len(missing) / len(samples) * 100
-            if missing_pct > 20:  # More than 20% missing is suspicious
-                print(f"[WARNING] {len(missing)}/{len(samples)} sampled files not found in Immich ({missing_pct:.1f}%)")
-                for f in missing[:5]:
-                    print(f"[WARNING]   - {f}")
-                if len(missing) > 5:
-                    print(f"[WARNING]   ... and {len(missing) - 5} more")
-                return False
-            else:
-                print(f"[INFO] {verified}/{len(samples)} sampled files verified in Immich ({len(missing)} not found, likely duplicates)")
-        else:
-            print(f"[INFO] All {verified} sampled files verified in Immich")
-        
-        return True
-        
-    except Exception as e:
-        print(f"[ERROR] Failed to verify import: {e}")
-        return False
-
 def is_valid_zip(zip_path: Path) -> bool:
     """Check if a zip file is valid and not corrupted."""
     try:
@@ -366,17 +286,6 @@ def import_export_to_immich(export_prefix, zip_files):
         export_prefix=export_prefix,
         delete_after_import=DELETE_AFTER_IMPORT
     )
-    
-    # Additional verification for zip deletion
-    if DELETE_AFTER_IMPORT and success:
-        # Verify import before considering it complete
-        if not verify_import(zip_files, processor.runner):
-            print(f"[WARNING] Import verification failed for {export_prefix}")
-            return True  # Still consider success since immich-go succeeded
-    
-    if not success:
-        print(f"[WARNING] Keeping zip files due to import failure")
-    
     return success
 
 

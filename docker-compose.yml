@@ -160,6 +160,48 @@ services:
       - "net.unraid.docker.icon=https://raw.githubusercontent.com/immich-app/immich/main/docs/static/img/favicon.png"
       - "net.unraid.docker.managed=composeman"
 
+  vscode-monitor:
+    build:
+      context: ./vscode-monitor
+      args:
+        COPILOT_VERSION: ${COPILOT_VERSION:-latest}
+    image: vscode-monitor:latest
+    container_name: vscode-monitor
+    restart: "no"
+    # Run as root for full docker access
+    user: "0:0"
+    environment:
+      - LOG_DIR=/app/logs
+      - GH_TOKEN=${GH_TOKEN:-}
+      - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      # Copilot model - use Claude Opus 4.5 by default
+      - COPILOT_MODEL=${COPILOT_MODEL:-claude-sonnet-4.5}
+      # Copilot version - if set, upgrade to this version at runtime
+      - COPILOT_VERSION=${COPILOT_VERSION:-}
+      # Unraid notify script path inside container
+      - UNRAID_NOTIFY=/unraid/notify
+    volumes:
+      # Docker socket for container management (restart, logs, build)
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Full project directory (read-write for script editing)
+      - .:/app:rw
+      - ${CHADBURN_DOCKERFILE}:/app/chadburn/docker-compose.yml:rw
+      # Prompt file for AI guidance
+      - ./vscode-monitor/copilot_prompt.md:/app/copilot_prompt.md:ro
+      # Logs directory for persistent logging
+      # Mount GitHub token file for Copilot CLI authentication
+      # Token is stored in state/.copilot-token for Unraid persistence
+      - ./state/.copilot-token:/root/.copilot-token:ro
+      # Mount Unraid notify script for sending alerts
+      - /usr/local/emhttp/plugins/dynamix/scripts/notify:/unraid/notify:ro
+    working_dir: /app/takeout-script
+    network_mode: bridge
+    labels:
+      - "chadburn.enabled=true"
+      # Run 30 minutes after automated-takeout to check for failures
+      - "chadburn.job-exec.vscode-monitor.schedule=40 1 * * *"
+      - "chadburn.job-exec.vscode-monitor.command=python3 /app/monitor_takeout.py"
+
   # sd-import:
   #   # Uses the immich-import image in 'folder' mode
   #   image: immich-import:latest

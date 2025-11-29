@@ -1,6 +1,7 @@
 # Environment files with secrets
 .env
 *.env
+analysis/
 
 # API keys and sensitive data
 state/

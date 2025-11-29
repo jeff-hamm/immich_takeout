@@ -346,8 +346,22 @@
                 <h3>Statistics</h3>
                 <div class="info-row">
                     <span class="info-label">Total Files</span>
-                    <span class="info-value">{{ metadata.total_files or metadata.files|length }}</span>
+                    <span class="info-value">{{ metadata.file_count or metadata.files|length }}</span>
                 </div>
+                {% if metadata.discovered_media_files %}
+                <div class="info-row">
+                    <span class="info-label">Discovered Media</span>
+                    <span class="info-value">{{ metadata.discovered_media_files }}</span>
+                </div>
+                {% endif %}
+                {% set processed = metadata.files|length if metadata.files else 0 %}
+                {% set total = metadata.discovered_media_files or metadata.file_count or 0 %}
+                {% if total > 0 and processed > 0 %}
+                <div class="info-row">
+                    <span class="info-label">Processed Files</span>
+                    <span class="info-value">{{ processed }} ({{ ((processed / total) * 100)|round(1) }}%)</span>
+                </div>
+                {% endif %}
                 {% if metadata.zip_files %}
                 <div class="info-row">
                     <span class="info-label">Total Size</span>
