@@ -557,6 +557,44 @@ if [ -f "$SCRIPT_DIR/unraid/go" ]; then
     mount -o remount,size=1G /var/log 2>/dev/null || true
     print_success "Increased /var/log to 1GB"
     
+    # Install array control scripts immediately
+    cat > /usr/local/bin/array-stop << 'ARRAY_EOF'
+#!/bin/bash
+echo "Stopping array..."
+/usr/local/sbin/emcmd cmdStop=Stop
+echo "Waiting for array to stop..."
+while grep -q 'mdState="STARTED"' /var/local/emhttp/var.ini 2>/dev/null; do
+    sleep 2
+    echo -n "."
+done
+echo ""
+echo "Array stopped."
+ARRAY_EOF
+    chmod +x /usr/local/bin/array-stop
+    
+    cat > /usr/local/bin/array-start << 'ARRAY_EOF'
+#!/bin/bash
+echo "Starting array..."
+/usr/local/sbin/emcmd cmdStart=Start
+echo "Waiting for array to start..."
+while ! grep -q 'mdState="STARTED"' /var/local/emhttp/var.ini 2>/dev/null; do
+    sleep 2
+    echo -n "."
+done
+echo ""
+echo "Array started."
+ARRAY_EOF
+    chmod +x /usr/local/bin/array-start
+    
+    cat > /usr/local/bin/array-restart << 'ARRAY_EOF'
+#!/bin/bash
+array-stop
+sleep 3
+array-start
+ARRAY_EOF
+    chmod +x /usr/local/bin/array-restart
+    print_success "Installed array control scripts (array-stop, array-start, array-restart)"
+    
     # Set up log cleanup cron immediately
     echo "0 3 * * * find /var/log -name '*.1' -o -name '*.2' -o -name '*.gz' | xargs rm -f 2>/dev/null" | crontab -
     print_success "Added daily log cleanup cron job (3am)"

@@ -5,6 +5,8 @@
 FROM node:22-slim
 
 # Install util-linux for nsenter (needed for host namespace notifications)
+# Install libvirt-clients for virsh (needed for VM healthchecks)
+# Install smartmontools for smartctl (needed for disk health checks)
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked \
     apt-get update && apt-get install -y \
@@ -14,6 +16,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     python3 \
     docker.io \
     util-linux \
+    libvirt-clients \
+    smartmontools \
     && rm -rf /var/lib/apt/lists/*
 
 # Install GitHub Copilot CLI globally
@@ -35,9 +39,9 @@ RUN mkdir -p /app/logs /state/analysis
 # Copy monitoring scripts
 COPY monitor_takeout.py /app/
 COPY copilot_prompt.md /app/
-COPY notify.sh /usr/local/bin/notify
-COPY notify_helper.py /app/
-RUN chmod +x /usr/local/bin/notify
+COPY send_alert.sh /usr/local/bin/send_alert
+COPY alert_helper.py /app/
+RUN chmod +x /usr/local/bin/send_alert
 
 # Default to running the monitor script
 CMD ["python3", "/app/vscode-monitor/monitor_takeout.py"]

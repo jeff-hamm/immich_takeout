@@ -63,7 +63,6 @@ services:
     network_mode: bridge
     labels:
       - "chadburn.enabled=true"
-      # Run daily at 5:00 AM, 1 hour after takeout-backup (4:00 AM)
       - "chadburn.job-exec.immich-import.schedule=0 5 * * *"
       - "chadburn.job-exec.immich-import.command=python /app/immich_import.py"
 
@@ -190,9 +189,17 @@ services:
       # FileBrowser config for analysis file links
       - FILEBROWSER_BASE_URL=${FILEBROWSER_BASE_URL:-}
       - FILEBROWSER_ANALYSIS_PATH=${FILEBROWSER_ANALYSIS_PATH:-}
+      # Home Assistant VM healthcheck config
+      - HA_VM_NAME=hammassistant
+      - HA_URL=http://192.168.1.179:8123
+      - HA_TOKEN=${HA_TOKEN:-}
     volumes:
       # Docker socket for container management (restart, logs, build)
       - /var/run/docker.sock:/var/run/docker.sock
+      # Libvirt socket for VM management (Home Assistant VM healthcheck)
+      - /var/run/libvirt/libvirt-sock:/var/run/libvirt/libvirt-sock:ro
+      # Host SSH keys for accessing VMs
+      - /root/.ssh:/root/.ssh:ro
       - .:/app:rw
       - ./state:/state:rw
       - ./docker-compose.yml:/app/docker-compose.yml:ro

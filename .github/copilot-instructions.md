@@ -3,13 +3,13 @@
 ## ⚠️ IMPORTANT RULES
 
 ### Command Restrictions
-- **NEVER use `/dev/null` or `\dev\null`** in any commands - the user cannot auto-approve commands containing these paths
-- Use alternatives like `> /tmp/output.txt` or simply omit output redirection when possible
+- **NEVER use `/dev/null`, `\dev\null` or `/tmp`** in any commands - the user cannot auto-approve commands containing these paths
+- Use alternatives like `> .tmp/output.txt` or simply omit output redirection when possible
 
 ### Environment Context
 - **Host**: Running directly on Unraid server at 192.168.1.216
 - **No SSH needed**: All commands run locally - do NOT use `ssh root@192.168.1.216`
-- **Direct access**: All paths like `/mnt/user/appdata/takeout-script` are directly accessible
+- **Direct access**: All paths like `$APP_PATH` are directly accessible
 
 ### Shell Aliases Available
 ```bash
@@ -70,7 +70,7 @@ Automated Google Photos backup system with these core functions:
 ## Directory Structure
 
 ```
-/mnt/user/appdata/takeout-script/
+$APP_PATH/
 ├── .github/                    # GitHub config, copilot instructions
 ├── shared/                     # Shared Python modules (mounted into containers)
 │   ├── takeout_utils.py        # Core utilities, constants, zip handling
@@ -99,15 +99,15 @@ Automated Google Photos backup system with these core functions:
 ### Host Paths
 | Path | Purpose |
 |------|---------|
-| `/mnt/user/appdata/takeout-script/` | Project source files |
+| `$APP_PATH/` | Project source files |
 | `/mnt/user/jumpdrive/imports/` | Import working directory |
 | `/mnt/user/jumpdrive/imports/Takeout/` | Synced Google Takeout zips |
 | `/mnt/user/jumpdrive/imports/metadata/` | Import metadata JSON files |
 | `/mnt/user/jumpdrive/imports/metadata/logs/` | immich-go JSON log files |
 | `/mnt/user/jumpdrive/imports/extracted/` | Extracted non-photos content |
 | `/mnt/user/jumpdrive/gdrive/` | Full Google Drive sync |
-| `/mnt/user/appdata/rclone/` | rclone config |
-| `/mnt/user/appdata/gphotos/chromeuser/` | Playwright browser profile |
+| `${APP_ROOT}/rclone/` | rclone config |
+| `${APP_ROOT}/gphotos/chromeuser/` | Playwright browser profile |
 
 ### Container Mount Points
 | Container Path | Host Path |

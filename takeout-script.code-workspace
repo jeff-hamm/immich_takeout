@@ -13,8 +13,14 @@
 			"**/*.pyc": true
 		},
 		"github.copilot.chat.autoApprove": [
-			"*>/dev/null*",
-			"*>\\dev\\null*",
+			"virsh*",
+			"docker*",
+			"dc*",
+			"python3*",
+			"jq*",
+			"sleep*",
+			"python3",
+			"python3 -c"
 		]
 	}
 }

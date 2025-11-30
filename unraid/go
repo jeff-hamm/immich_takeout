@@ -78,6 +78,49 @@ if [ -f "$APP_PATH/state/.copilot-token" ]; then
     ln -sf "$APP_PATH/state/.copilot-token" /root/.copilot-token
 fi
 
+# Install array control functions into /usr/local/bin for easy access
+cat > /usr/local/bin/array-stop << 'ARRAY_EOF'
+#!/bin/bash
+echo "Stopping array..."
+/usr/local/sbin/emcmd cmdStop=Stop
+echo "Waiting for array to stop..."
+while grep -q 'mdState="STARTED"' /var/local/emhttp/var.ini 2>/dev/null; do
+    sleep 2
+    echo -n "."
+done
+echo ""
+echo "Array stopped."
+ARRAY_EOF
+chmod +x /usr/local/bin/array-stop
+
+cat > /usr/local/bin/array-start << 'ARRAY_EOF'
+#!/bin/bash
+echo "Starting array..."
+/usr/local/sbin/emcmd cmdStart=Start
+echo "Waiting for array to start..."
+while ! grep -q 'mdState="STARTED"' /var/local/emhttp/var.ini 2>/dev/null; do
+    sleep 2
+    echo -n "."
+done
+echo ""
+echo "Array started."
+ARRAY_EOF
+chmod +x /usr/local/bin/array-start
+
+cat > /usr/local/bin/array-restart << 'ARRAY_EOF'
+#!/bin/bash
+array-stop
+sleep 3
+array-start
+ARRAY_EOF
+chmod +x /usr/local/bin/array-restart
+
+# Install fix-disabled-disk script
+if [ -f /boot/config/custom-scripts/fix-disabled-disk.sh ]; then
+    cp /boot/config/custom-scripts/fix-disabled-disk.sh /usr/local/bin/fix-disabled-disk
+    chmod +x /usr/local/bin/fix-disabled-disk
+fi
+
 # Increase /var/log tmpfs to 1GB (default is 128MB which fills up quickly)
 mount -o remount,size=1G /var/log
 
