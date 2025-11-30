@@ -203,6 +203,9 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
       # Libvirt socket for VM management (Home Assistant VM healthcheck)
       - /var/run/libvirt/libvirt-sock:/var/run/libvirt/libvirt-sock:ro
+      # Host system info for health monitoring (read-only)
+      - /proc:/host/proc:ro
+      - /var/local/emhttp:/host/emhttp:ro
       # Host SSH keys for accessing VMs
       - /root/.ssh:/root/.ssh:ro
       - .:/app:rw

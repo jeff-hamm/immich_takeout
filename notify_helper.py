@@ -29,14 +29,18 @@ def send_notification(event, subject, description, importance, message=None, lin
     
     if link:
         # Check if link is a path to analysis directory
-        if link.startswith('/state/analysis/'):
+        if link.startswith('/state/analysis/') or link.startswith('/app/state/analysis/'):
             # Convert to public FileBrowser URL if FILEBROWSER_BASE_URL is set
             filebrowser_base = os.environ.get('FILEBROWSER_BASE_URL', '')
+            filebrowser_path = os.environ.get('FILEBROWSER_ANALYSIS_PATH', 'appdata/takeout-script/state/analysis')
             if filebrowser_base:
                 # Extract filename from path
-                filename = link.split('/')[-1]
-                # Construct FileBrowser URL (assumes analysis files are in /srv/analysis)
-                link = f"{filebrowser_base}/files/srv/analysis/{filename}"
+                if link.startswith('/app/state/analysis/'):
+                    filename = link[len('/app/state/analysis/'):]
+                else:
+                    filename = link[len('/state/analysis/'):]
+                # Construct FileBrowser URL
+                link = f"{filebrowser_base}/{filebrowser_path}/{filename}"
         
         cmd_parts.extend(['-l', link])
     

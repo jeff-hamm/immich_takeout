@@ -46,9 +46,12 @@ while [[ $# -gt 0 ]]; do
         -l)
             shift
             link="$1"
-            # Transform /state/analysis/<filename> to public URL (if FILEBROWSER_BASE_URL is set)
+            # Transform /state/analysis/<filename> or /app/state/analysis/<filename> to public URL
             if [[ "$link" == /state/analysis/* && -n "$ANALYSIS_BASE_URL" ]]; then
                 filename="${link#/state/analysis/}"
+                link="${ANALYSIS_BASE_URL}/${filename}"
+            elif [[ "$link" == /app/state/analysis/* && -n "$ANALYSIS_BASE_URL" ]]; then
+                filename="${link#/app/state/analysis/}"
                 link="${ANALYSIS_BASE_URL}/${filename}"
             fi
             args+=("-l" "$link")

@@ -30,8 +30,8 @@ def transform_link(link: str) -> str:
     if not link:
         return link
     
-    # Handle /state/analysis/ or /analysis/ paths
-    for prefix in ["/state/analysis/", "/analysis/"]:
+    # Handle /state/analysis/, /app/state/analysis/, or /analysis/ paths
+    for prefix in ["/app/state/analysis/", "/state/analysis/", "/analysis/"]:
         if link.startswith(prefix):
             if FILEBROWSER_BASE_URL:
                 filename = link[len(prefix):]
