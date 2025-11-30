@@ -177,6 +177,11 @@ services:
       - LOG_DIR=/app/logs
       - GH_TOKEN=${GH_TOKEN:-}
       - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+      # Git user config for commits (uses repo local config if not set)
+      - GIT_AUTHOR_NAME=${GIT_AUTHOR_NAME:-Copilot Agent}
+      - GIT_AUTHOR_EMAIL=${GIT_AUTHOR_EMAIL:-copilot@users.noreply.github.com}
+      - GIT_COMMITTER_NAME=${GIT_COMMITTER_NAME:-Copilot Agent}
+      - GIT_COMMITTER_EMAIL=${GIT_COMMITTER_EMAIL:-copilot@users.noreply.github.com}
       # Copilot model - use Claude Opus 4.5 by default
       - COPILOT_MODEL=${COPILOT_MODEL:-claude-sonnet-4.5}
       # Copilot version - if set, upgrade to this version at runtime

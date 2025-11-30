@@ -20,6 +20,14 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     smartmontools \
     && rm -rf /var/lib/apt/lists/*
 
+# Install GitHub CLI (gh) for creating pull requests
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
+    && apt-get update \
+    && apt-get install -y gh \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install GitHub Copilot CLI globally
 # This is the NEW agentic Copilot CLI (not the deprecated gh extension)
 ARG COPILOT_VERSION=latest
@@ -32,6 +40,10 @@ RUN git config --global --add safe.directory /app && \
     git config --global --add safe.directory /state && \
     git config --global --add safe.directory '*'
 
+# Configure git to use GH_TOKEN for authentication via credential helper
+# This allows git push/pull to work with the GH_TOKEN environment variable
+RUN git config --global credential.helper '!f() { echo "username=x-access-token"; echo "password=$GH_TOKEN"; }; f'
+
 # Create directories
 WORKDIR /app
 RUN mkdir -p /app/logs /state/analysis
@@ -41,7 +53,8 @@ COPY monitor_takeout.py /app/
 COPY copilot_prompt.md /app/
 COPY send_alert.sh /usr/local/bin/send_alert
 COPY alert_helper.py /app/
-RUN chmod +x /usr/local/bin/send_alert
+COPY host_cmd.sh /usr/local/bin/host_cmd
+RUN chmod +x /usr/local/bin/send_alert /usr/local/bin/host_cmd
 
 # Default to running the monitor script
 CMD ["python3", "/app/vscode-monitor/monitor_takeout.py"]

@@ -25,17 +25,37 @@ Save reports to `/state/analysis/daily_report_YYYYMMDD_HHMMSS.md` and send notif
 
 - **Container**: `vscode-monitor` with docker socket access
 - **Working directory**: `/app`
-- **Persistent state**: `/state/` (notes: `/state/copilot/notes_to_self.md`)
+- **Persistent state**: `/state/` - USE THIS PATH, not /app/state
+- **Notes file**: `/state/copilot/notes_to_self.md`
 - **Analysis output**: `/state/analysis/`
-- **Host access**: via `nsenter -t 1 -m -u -i -n -p -- <command>`
 
 ### Key Paths
 | Path | Access | Purpose |
 |------|--------|---------|
+| `/state/` | RW | Persistent state directory - ALWAYS use this |
+| `/state/analysis/` | RW | Daily reports go here |
+| `/state/copilot/` | RW | Your notes between runs |
 | `/app/docker-compose.yml` | RW | Main project compose |
 | `/app/automated-takeout/` | RW | Takeout automation scripts |
 | `/app/chadburn/docker-compose.yml` | RW | Chadburn scheduler config |
-| `/app/immich/`, `/app/jumpflix/`, `/app/onedrive/` | RO | Other service configs |
+
+---
+
+## Running Host Commands
+
+**IMPORTANT**: Use the wrapper script, not raw nsenter (which gets blocked):
+```bash
+# Use this wrapper for ALL host commands:
+host_cmd <command> [args...]
+
+# Examples:
+host_cmd cat /proc/mdstat
+host_cmd free -h
+host_cmd df -h /boot /mnt/user
+host_cmd virsh list --all
+```
+
+The `host_cmd` wrapper runs commands on the Unraid host via nsenter.
 
 ---
 
@@ -48,11 +68,6 @@ python3 /app/alert_helper.py -e "event" -s "subject" -d "description" -i "normal
 
 **Always include `-l` for daily reports** pointing to the analysis file.
 
-Common links:
-- Metadata Viewer: `http://192.168.1.216:5050`
-- Immich: `http://192.168.1.216:2283`
-- Login Helper VNC: `http://192.168.1.216:6901`
-
 ---
 
 ## Health Check Tasks
@@ -62,20 +77,14 @@ Common links:
 docker ps -a --format 'table {{.Names}}\t{{.Status}}'
 docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}'
 ```
-Check restart policies - containers with `always`/`unless-stopped` should be running.
 
-### 2. Unraid System
+### 2. Unraid System (use host_cmd wrapper)
 ```bash
-# Array status (most important)
-nsenter -t 1 -m -u -i -n -p -- cat /proc/mdstat
-
-# Resources
-nsenter -t 1 -m -u -i -n -p -- free -h
-nsenter -t 1 -m -u -i -n -p -- df -h /boot /mnt/user /mnt/cache
-nsenter -t 1 -m -u -i -n -p -- cat /proc/loadavg
-
-# Disk health
-nsenter -t 1 -m -u -i -n -p -- cat /var/local/emhttp/disks.ini
+host_cmd cat /proc/mdstat          # Array status
+host_cmd free -h                   # Memory
+host_cmd df -h /boot /mnt/user /mnt/cache  # Disk space
+host_cmd cat /proc/loadavg         # Load average
+host_cmd cat /var/local/emhttp/disks.ini   # Disk health
 ```
 
 **Alert thresholds**: Memory >90%, disk >95%, load > 2x CPU cores, disabled disks > 0
@@ -85,11 +94,10 @@ nsenter -t 1 -m -u -i -n -p -- cat /var/local/emhttp/disks.ini
 /app/immich_jobs.sh          # Check status
 /app/immich_jobs.sh resume   # Resume if paused
 ```
-Report if you resumed paused jobs.
 
 ### 4. VMs
 ```bash
-nsenter -t 1 -m -u -i -n -p -- virsh list --all
+host_cmd virsh list --all
 ```
 
 ---
@@ -107,15 +115,10 @@ curl -s -m 5 -H "Authorization: Bearer $HA_TOKEN" http://192.168.1.179:8123/api/
 
 **If port 8123 not responding** - usually the core container crashed:
 ```bash
-# Check container status via guest agent
 virsh qemu-agent-command hammassistant '{"execute":"guest-exec","arguments":{"path":"docker","arg":["ps","-a","--format","{{.Names}}: {{.Status}}","--filter","name=homeassistant"],"capture-output":true}}'
-# Get result with returned PID, decode base64 output
-
-# Fix crashed container
-virsh qemu-agent-command hammassistant '{"execute":"guest-exec","arguments":{"path":"docker","arg":["start","homeassistant"],"capture-output":true}}'
 ```
 
-**VM not running**: `virsh start hammassistant` (takes 2-5 min to fully boot)
+**VM not running**: `virsh start hammassistant`
 
 ---
 
@@ -126,62 +129,41 @@ Check `docker logs automated-takeout` for:
 | Status | Indicators | Action |
 |--------|------------|--------|
 | SUCCESS | No errors, takeout created | None |
-| AUTH_REQUIRED | Login expired messages | Alert user → VNC at port 6901 |
-| FAILURE | Selector/locator errors | Attempt fix (see below) |
+| AUTH_REQUIRED | Login expired | Alert user → VNC at port 6901 |
+| FAILURE | Selector errors | Attempt fix |
 
-**Fixing selector failures**:
-1. Identify failed element from logs
-2. Edit `/app/automated-takeout/automated_takeout.py` with more robust selector
-3. Verify: `python3 -m py_compile /app/automated-takeout/automated_takeout.py`
-4. Rebuild: `docker-compose build automated-takeout`
-
-**Selector tips**: Use `page.get_by_role()`, `page.get_by_text()`, regex patterns, or `.or_()` fallbacks.
+**Fixing**: Edit `/app/automated-takeout/automated_takeout.py`, verify with `python3 -m py_compile`, rebuild with `docker-compose build automated-takeout`.
 
 ---
 
 ### Chadburn Scheduler
 
-**Issue #127**: Bug causes goroutine leak with multiple "Started watching Docker events" messages.
-
-Currently pinned to known-good SHA in `/app/chadburn/docker-compose.yml`:
-```
-premoweb/chadburn@sha256:096be3c00f39db7d7d33763432456ab8bdc79f0f5da7ec20fec5ff071f3e841f
-```
+**Issue #127**: Goroutine leak bug. Pinned to known-good SHA.
 
 **Daily check**:
 ```bash
 curl -s "https://api.github.com/repos/PremoWeb/Chadburn/issues/127" | grep '"state"'
 ```
 
-**If issue closed**: Update to `latest`, monitor for 5 min, revert if >5 "Started watching" messages appear. Remove this section from prompt when confirmed fixed.
+If closed: Update to `latest`, monitor 5 min, revert if >5 "Started watching" messages.
 
 ---
 
 ## Self-Maintenance
 
-### Model Updates
-Check if newer Claude Sonnet available, update `COPILOT_MODEL` in `/app/docker-compose.yml`:
-```yaml
-COPILOT_MODEL:-claude-sonnet-4.5  # or newer when available
-```
-
 ### Notes
-Use `/state/copilot/notes_to_self.md` for observations across runs. Keep it tidy.
+Use `/state/copilot/notes_to_self.md` for observations across runs. Create the directory if needed:
+```bash
+mkdir -p /state/copilot
+```
 
 ---
 
 ## Quick Reference
 
-**Rebuild a service**: `docker-compose build <service> && docker-compose up -d <service>`
-
-**View logs**: `docker logs --tail 100 <container>`
-
-**Host command**: `nsenter -t 1 -m -u -i -n -p -- <command>`
-
-**HA guest agent pattern**:
-```bash
-# Execute command, get PID
-virsh qemu-agent-command hammassistant '{"execute":"guest-exec","arguments":{"path":"CMD","arg":["ARG1","ARG2"],"capture-output":true}}'
-# Get result (decode base64 out-data)
-virsh qemu-agent-command hammassistant '{"execute":"guest-exec-status","arguments":{"pid":PID}}'
-```
+| Task | Command |
+|------|---------|
+| Host command | `host_cmd <cmd>` |
+| Send alert | `python3 /app/alert_helper.py -e "event" -s "subject" -d "desc" -i "normal"` |
+| Rebuild service | `docker-compose build <svc> && docker-compose up -d <svc>` |
+| View logs | `docker logs --tail 100 <container>` |
