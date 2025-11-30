@@ -43,25 +43,23 @@ Save reports to `/state/analysis/daily_report_YYYYMMDD_HHMMSS.md` and send notif
 
 ## Running Host Commands
 
-**IMPORTANT**: Use the wrapper script, not raw nsenter (which gets blocked):
+**IMPORTANT**: Use the `host_cmd` wrapper for ALL commands that need to run on the Unraid host:
 ```bash
-# Use this wrapper for ALL host commands:
 host_cmd <command> [args...]
 
 # Examples:
 host_cmd cat /proc/mdstat
-host_cmd free -h
+host_cmd free -h  
 host_cmd df -h /boot /mnt/user
 host_cmd virsh list --all
 ```
 
-The `host_cmd` wrapper runs commands on the Unraid host via nsenter.
+Do NOT use raw `nsenter` - it gets blocked. The `host_cmd` wrapper handles this.
 
 ---
 
 ## Notifications
 
-Use the Python helper (named "alert" to avoid Copilot CLI blocking):
 ```bash
 python3 /app/alert_helper.py -e "event" -s "subject" -d "description" -i "normal|warning|alert" [-m "message"] [-l "link"]
 ```
@@ -78,7 +76,7 @@ docker ps -a --format 'table {{.Names}}\t{{.Status}}'
 docker stats --no-stream --format 'table {{.Name}}\t{{.CPUPerc}}\t{{.MemUsage}}'
 ```
 
-### 2. Unraid System (use host_cmd wrapper)
+### 2. Unraid System (use host_cmd)
 ```bash
 host_cmd cat /proc/mdstat          # Array status
 host_cmd free -h                   # Memory
@@ -102,45 +100,109 @@ host_cmd virsh list --all
 
 ---
 
-## Specific Monitors
+## Home Assistant Deep Inspection
 
-### Home Assistant VM (`hammassistant`)
+The HA VM `hammassistant` at 192.168.1.179 requires thorough daily checks.
 
-**Environment**: `HA_URL=http://192.168.1.179:8123`, `HA_TOKEN` (env var)
-
-**Quick health check**:
+### Quick Health
 ```bash
-curl -s -m 5 -H "Authorization: Bearer $HA_TOKEN" http://192.168.1.179:8123/api/config | python3 -c "import sys,json; d=json.load(sys.stdin); print(f'HA {d[\"version\"]} - OK')" 2>/dev/null || echo "HA not responding"
+curl -s -m 5 -H "Authorization: Bearer $HA_TOKEN" \
+  http://192.168.1.179:8123/api/config | \
+  python3 -c "import sys,json; d=json.load(sys.stdin); print(f'HA {d[\"version\"]} @ {d[\"location_name\"]}')"
 ```
 
-**If port 8123 not responding** - usually the core container crashed:
+### Check for Available Updates
 ```bash
-virsh qemu-agent-command hammassistant '{"execute":"guest-exec","arguments":{"path":"docker","arg":["ps","-a","--format","{{.Names}}: {{.Status}}","--filter","name=homeassistant"],"capture-output":true}}'
+# Core updates
+curl -s -H "Authorization: Bearer $HA_TOKEN" \
+  http://192.168.1.179:8123/api/states/update.home_assistant_core_update | \
+  python3 -c "import sys,json; s=json.load(sys.stdin); a=s['attributes']; print(f\"Core: {a.get('installed_version')} -> {a.get('latest_version')} ({'UPDATE AVAILABLE' if s['state']=='on' else 'up to date'})\")"
+
+# OS updates  
+curl -s -H "Authorization: Bearer $HA_TOKEN" \
+  http://192.168.1.179:8123/api/states/update.home_assistant_operating_system_update | \
+  python3 -c "import sys,json; s=json.load(sys.stdin); a=s['attributes']; print(f\"OS: {a.get('installed_version')} -> {a.get('latest_version')} ({'UPDATE AVAILABLE' if s['state']=='on' else 'up to date'})\")"
+
+# Supervisor updates
+curl -s -H "Authorization: Bearer $HA_TOKEN" \
+  http://192.168.1.179:8123/api/states/update.home_assistant_supervisor_update | \
+  python3 -c "import sys,json; s=json.load(sys.stdin); a=s['attributes']; print(f\"Supervisor: {a.get('installed_version')} -> {a.get('latest_version')} ({'UPDATE AVAILABLE' if s['state']=='on' else 'up to date'})\")"
 ```
 
-**VM not running**: `virsh start hammassistant`
+### Check HA Logs for Errors
+```bash
+# Get recent error/warning logs via API
+curl -s -H "Authorization: Bearer $HA_TOKEN" \
+  "http://192.168.1.179:8123/api/error_log" | tail -100
+```
+
+### Check Problem Entities
+```bash
+# Get entities in unavailable/unknown state
+curl -s -H "Authorization: Bearer $HA_TOKEN" \
+  http://192.168.1.179:8123/api/states | \
+  python3 -c "
+import sys,json
+states = json.load(sys.stdin)
+problems = [s for s in states if s['state'] in ('unavailable', 'unknown')]
+if problems:
+    print(f'⚠️ {len(problems)} problem entities:')
+    for p in problems[:10]:
+        print(f\"  - {p['entity_id']}: {p['state']}\")
+    if len(problems) > 10:
+        print(f'  ... and {len(problems)-10} more')
+else:
+    print('✅ No unavailable/unknown entities')
+"
+```
+
+### Check Addon Status (via guest agent)
+```bash
+# Run 'ha addons' inside the VM
+virsh qemu-agent-command hammassistant \
+  '{"execute":"guest-exec","arguments":{"path":"ha","arg":["addons","--raw-json"],"capture-output":true}}'
+# Get result with returned PID, decode base64, parse JSON for addon states
+```
+
+### If Port 8123 Not Responding
+Usually means the core container crashed:
+```bash
+# Check container status
+virsh qemu-agent-command hammassistant \
+  '{"execute":"guest-exec","arguments":{"path":"docker","arg":["ps","-a","--format","{{.Names}}: {{.Status}}","--filter","name=homeassistant"],"capture-output":true}}'
+
+# Fix crashed container  
+virsh qemu-agent-command hammassistant \
+  '{"execute":"guest-exec","arguments":{"path":"docker","arg":["start","homeassistant"],"capture-output":true}}'
+```
+
+### HA Alert Conditions
+| Condition | Importance |
+|-----------|------------|
+| VM not running | alert |
+| Port 8123 not responding | alert |
+| Core update available | normal |
+| >10 unavailable entities | warning |
+| Errors in log | warning |
 
 ---
 
-### Automated Takeout Script
+## Automated Takeout Script
 
 Check `docker logs automated-takeout` for:
 
 | Status | Indicators | Action |
 |--------|------------|--------|
 | SUCCESS | No errors, takeout created | None |
-| AUTH_REQUIRED | Login expired | Alert user → VNC at port 6901 |
+| AUTH_REQUIRED | Login expired | Alert → VNC port 6901 |
 | FAILURE | Selector errors | Attempt fix |
-
-**Fixing**: Edit `/app/automated-takeout/automated_takeout.py`, verify with `python3 -m py_compile`, rebuild with `docker-compose build automated-takeout`.
 
 ---
 
-### Chadburn Scheduler
+## Chadburn Scheduler
 
 **Issue #127**: Goroutine leak bug. Pinned to known-good SHA.
 
-**Daily check**:
 ```bash
 curl -s "https://api.github.com/repos/PremoWeb/Chadburn/issues/127" | grep '"state"'
 ```
@@ -151,8 +213,7 @@ If closed: Update to `latest`, monitor 5 min, revert if >5 "Started watching" me
 
 ## Self-Maintenance
 
-### Notes
-Use `/state/copilot/notes_to_self.md` for observations across runs. Create the directory if needed:
+Use `/state/copilot/notes_to_self.md` for observations across runs:
 ```bash
 mkdir -p /state/copilot
 ```
@@ -166,4 +227,3 @@ mkdir -p /state/copilot
 | Host command | `host_cmd <cmd>` |
 | Send alert | `python3 /app/alert_helper.py -e "event" -s "subject" -d "desc" -i "normal"` |
 | Rebuild service | `docker-compose build <svc> && docker-compose up -d <svc>` |
-| View logs | `docker logs --tail 100 <container>` |
