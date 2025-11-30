@@ -205,10 +205,14 @@ def run_copilot(prompt: str, timestamp: str) -> tuple[int, str]:
     
     # Pre-trust the directories we'll be working in
     # Must include /state since it's a separate mount from /app
+    # Also include /host for host system mounts (proc, emhttp)
     trusted_folders = [
         str(Path(PROJECT_DIR).resolve()),
         "/state",
         "/app",
+        "/host",
+        "/host/proc",
+        "/host/emhttp",
     ]
     config = {"trusted_folders": trusted_folders}
     with open(config_file, "w") as f:
