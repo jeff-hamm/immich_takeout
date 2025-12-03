@@ -57,7 +57,7 @@ services:
       - PAUSE_IMMICH_JOBS=true
     volumes:
       - ${GDRIVE_PATH}/Takeout:/data/import/Takeout
-      - ${STATE_PATH}/.immich_api_key:/run/secrets/immich_api_key:ro
+      - /root/.auth/.immich_api_key:/run/secrets/immich_api_key:ro
       - ${IMPORTS_PATH}/metadata:/data/metadata
       - ${IMPORTS_PATH}:/data/extracted
     network_mode: bridge
@@ -160,13 +160,13 @@ services:
       - "net.unraid.docker.icon=https://raw.githubusercontent.com/immich-app/immich/main/docs/static/img/favicon.png"
       - "net.unraid.docker.managed=composeman"
 
-  vscode-monitor:
+  copilot-system-monitor:
     build:
-      context: ./vscode-monitor
+      context: /root/scripts/copilot_system_monitor
       args:
         COPILOT_VERSION: ${COPILOT_VERSION:-latest}
-    image: vscode-monitor:latest
-    container_name: vscode-monitor
+    image: copilot-system-monitor:latest
+    container_name: takeout-system-monitor
     restart: "no"
     # Run as root for full docker access
     user: "0:0"
@@ -208,16 +208,17 @@ services:
       - /var/local/emhttp:/host/emhttp:ro
       # Host SSH keys for accessing VMs
       - /root/.ssh:/root/.ssh:ro
-      - .:/app:rw
+      # State and logs persistence
       - ./state:/state:rw
+      - ./state/logs:/app/logs:rw
+      # Docker compose files for monitoring
       - ./docker-compose.yml:/app/docker-compose.yml:ro
       - ${APP_ROOT}/onedrive/docker:/app/onedrive:ro
       - ${APP_ROOT}/immich/docker:/app/immich:ro
       - ${APP_ROOT}/jumpflix/docker:/app/jumpflix:ro
       - ${APP_ROOT}/chadburn/docker-compose.yml:/app/chadburn/docker-compose.yml:rw
       - ${APP_ROOT}:${APP_ROOT}:ro
-      - ./vscode-monitor/copilot_prompt.md:/app/copilot_prompt.md:ro
-      - ./state/.copilot-token:/root/.copilot-token:ro
+      - /root/.auth/.copilot-token:/root/.auth/.copilot-token:ro
     working_dir: /app
     network_mode: bridge
     labels:
